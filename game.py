@@ -122,18 +122,28 @@ class Game:
             self.say(f"地下 {self.depth} 階に到達した！")
         self.no_food += 1
         self.held_by, self.vf_hit = None, 0
+        while True:  # どの部屋にも歩いて行ける地図ができるまで作り直す (保険。通常は 1 回で通る)
+            self._build_map()
+            if self._all_joined():
+                break
+        self._populate()
+
+    def _build_map(self):
+        rng = self.rng
         self.tiles = [[ROCK] * W for _ in range(H)]
         self.rooms = []
         gone = set(rng.sample(range(9), self.rnd(4)))
         for i in range(9):
             left, top = (i % 3) * 26 + 1, (i // 3) * 8 or 1
             if i in gone:
-                x, y = left + self.rnd(24) + 1, top + self.rnd(6) + 1
+                x, y = left + self.rnd(24) + 1, top + 1 + self.rnd((i // 3) * 8 + 5 - top)
                 self.rooms.append(dict(x=x, y=y, w=1, h=1, gone=True, dark=True, gold=False))
                 self.tiles[y][x] = PASSAGE
                 continue
             w, h = self.rnd(22) + 4, self.rnd(4) + 4
-            x, y = left + self.rnd(26 - w), top + self.rnd(8 - h)
+            # 区画の右端の列と下端の行は岩のまま残す。隣の区画の部屋と壁が接すると、扉どうしをつなぐ通路を掘れない
+            h = min(h, (i // 3) * 8 + 7 - top)
+            x, y = left + self.rnd(26 - w), top + self.rnd((i // 3) * 8 + 8 - top - h)
             room = dict(x=x, y=y, w=w, h=h, gone=False, dark=self.rnd(10) < self.depth - 1, gold=False)
             self.rooms.append(room)
             for yy in range(y, y + h):
@@ -142,6 +152,20 @@ class Game:
                     self.tiles[yy][xx] = RWALL if edge else FLOOR
         self._passages()
 
+    def _all_joined(self):
+        starts = [(r["x"] + (0 if r["gone"] else 1), r["y"] + (0 if r["gone"] else 1)) for r in self.rooms]
+        seen, q = {starts[0]}, deque([starts[0]])
+        while q:
+            x, y = q.popleft()
+            for dx, dy in DIRS:
+                n = (x + dx, y + dy)
+                if n not in seen and self._step_ok(x, y, *n):
+                    seen.add(n)
+                    q.append(n)
+        return all(p in seen for p in starts)
+
+    def _populate(self):
+        rng = self.rng
         self.monsters, self.items = [], []
         real = [r for r in self.rooms if not r["gone"]]
         taken = set()
