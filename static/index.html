@@ -44,6 +44,8 @@
   #died.show { visibility: visible; }
   #died div { text-align: center; font: 400 72px/1.1 var(--font); letter-spacing: .1em; color: var(--bad); text-shadow: 4px 4px 0 #2a0806; }
   #died.show div { animation: blink 0.8s steps(1) infinite; }
+  #died.won { background: rgba(30, 24, 6, .6); }
+  #died.won div { color: var(--accent); text-shadow: 4px 4px 0 #2a2006; animation: none; }
   #died small { display: block; font: 16px/1.6 var(--font); letter-spacing: 0; color: var(--text); text-shadow: 2px 2px 0 #000; margin-top: 12px; animation: none; }
   @keyframes blink { 50% { color: #7a2620; } }
 
@@ -108,9 +110,9 @@
 </header>
 <main>
   <fieldset class="stage">
-    <legend>DUNGEON<em id="depth">B1F</em></legend>
+    <legend>DUNGEON<em id="depth">B1F</em><em>目標 B20F</em></legend>
     <canvas id="cv"></canvas>
-    <div id="died"><div>LAYA DIED<small id="diedSub"></small></div></div>
+    <div id="died"><div><span id="diedTitle">LAYA DIED</span><small id="diedSub"></small></div></div>
   </fieldset>
   <aside>
     <fieldset>
@@ -119,6 +121,10 @@
       <div class="grid">
         <div class="cell"><div class="v" id="hpv">–</div><div class="k">HP</div></div>
         <div class="cell"><div class="v" id="lv">1</div><div class="k">レベル</div></div>
+        <div class="cell"><div class="v" id="str">16</div><div class="k">力</div></div>
+        <div class="cell"><div class="v" id="ac">6</div><div class="k" title="小さいほど硬い">防御</div></div>
+        <div class="cell"><div class="v" id="hunger">–</div><div class="k">満腹</div></div>
+        <div class="cell"><div class="v" id="food">1</div><div class="k">食料</div></div>
         <div class="cell"><div class="v" id="pot">0</div><div class="k">回復薬</div></div>
         <div class="cell"><div class="v" id="gold">0</div><div class="k">金貨</div></div>
         <div class="cell"><div class="v" id="kills">0</div><div class="k">撃破</div></div>
@@ -158,13 +164,18 @@
 
 <script>
 const $ = id => document.getElementById(id);
-const JP = { attack: "攻撃", approach: "接近", flee: "逃走", drink_potion: "回復薬", pick_up: "回収", explore: "探索", descend: "階段へ", rest: "休憩" };
+const JP = { attack: "攻撃", approach: "接近", flee: "逃走", quaff_heal: "回復薬", quaff_str: "力の薬", eat: "食事", pick_up: "回収",
+             equip: "装備", explore: "探索", descend: "階段へ", rest: "待機" };
+const HUNGER_JP = { fine: "十分", hungry: "空腹", weak: "衰弱", fainting: "飢餓" };
 const ORDER = Object.keys(JP);
 const ORDER_JP = { cautious: "慎重に", aggressive: "攻めろ", loot: "漁れ", descend: "降りろ" };
-const scoreOf = h => h.depth * 100 + h.kills * 10 + h.gold;
+const scoreOf = h => h.depth * 100 + h.level * 20 + h.gold;
 let order = null, hiscore = 0;
 try { hiscore = +localStorage.getItem("laya-rogue-hiscore") || 0; } catch {}
-const GLYPH = { rat: ["r", "#b08a5e"], goblin: ["g", "#93b060"], ogre: ["O", "#c85a44"], potion: ["!", "#b184c4"], gold: ["$", "#e2c25c"] };
+const ITEM = { gold: ["*", "#e2c25c"], food: [":", "#c9a87a"], potion: ["!", "#b184c4"], weapon: [")", "#a9b4bd"], armor: ["]", "#a9b4bd"] };
+const monsterColor = mo => mo.awake ? "#c85a44" : "#8d8a72";   // 眠っている相手はくすんだ色、襲ってくる相手は赤
+const VIEW_W = 50;                                                // 横 80 マスのうち、勇者を中心にこの幅だけ映す
+let camX = 0;
 const FONT = '"DotGothic16", "MS Gothic", monospace';
 
 let GW = 48, GH = 26, T = 20;
@@ -185,12 +196,14 @@ ws.onmessage = ev => {
   else if (m.type === "generation") setGeneration(m.generation);
   else if (m.type === "floor") { tiles = Array.from({ length: GH }, () => new Array(GW).fill(-1)); monsters.clear(); hero = null; heroDraw = null; $("died").classList.remove("show"); }
   else if (m.type === "frame") onFrame(m);
-  else if (m.type === "death") {
-    shake = 1;
+  else if (m.type === "end") {
+    shake = m.won ? 0 : 1;
     const gs = genStats.get(genLabel(m.generation)) ?? { runs: 0, depth: 0, best: 0, kills: 0 };
     gs.runs++; gs.depth += m.depth; gs.kills += m.kills; gs.best = Math.max(gs.best, m.depth);
     genStats.set(genLabel(m.generation), gs); renderGenStats();
-    $("diedSub").textContent = `B${m.depth}F / Lv${m.level} / 撃破 ${m.kills} / 金貨 ${m.gold} / ${m.turn} ターン`;
+    $("diedTitle").textContent = m.won ? "B20F 到達！" : "LAYA DIED";
+    $("diedSub").textContent = (m.won ? "" : `死因: ${m.cause} / `) + `B${m.depth}F / Lv${m.level} / 撃破 ${m.kills} / 金貨 ${m.gold} / ${m.turn} ターン`;
+    $("died").classList.toggle("won", m.won);
     $("died").classList.add("show");
   }
 };
@@ -271,7 +284,7 @@ function onFrame(m) {
   }
   for (const [id, old] of monsters) if (!seenIds.has(id)) {
     if (Math.max(Math.abs(old.x - m.hero.x), Math.abs(old.y - m.hero.y)) <= 1 && m.decision.action === "attack")
-      for (let k = 0; k < 10; k++) floats.push({ x: old.x, y: old.y, vx: (Math.random() - .5) * 5, vy: (Math.random() - .5) * 5, text: "*", c: GLYPH[old.kind][1], life: 0.45 });
+      for (let k = 0; k < 10; k++) floats.push({ x: old.x, y: old.y, vx: (Math.random() - .5) * 5, vy: (Math.random() - .5) * 5, text: "·", c: "#c85a44", life: 0.45 });
     monsters.delete(id);
   }
   hero = m.hero;
@@ -294,7 +307,10 @@ setInterval(() => {                       // パネルは 10Hz。毎フレーム
   const h = m.hero, f = h.hp / h.max_hp;
   $("depth").textContent = `B${h.depth}F`;
   $("hp").style.width = f * 100 + "%"; $("hpbar").style.setProperty("--c", f <= .25 ? "var(--bad)" : f <= .5 ? "var(--warn)" : "var(--ok)");
-  $("hpv").textContent = `${h.hp}/${h.max_hp}`; $("lv").textContent = h.level; $("pot").textContent = h.potions;
+  $("hpv").textContent = `${h.hp}/${h.max_hp}`; $("lv").textContent = h.level; $("pot").textContent = h.heal;
+  $("str").textContent = h.str < h.max_str ? `${h.str}/${h.max_str}` : h.str; $("ac").textContent = h.ac;
+  $("hunger").textContent = HUNGER_JP[h.hunger] ?? h.hunger; $("food").textContent = h.food;
+  $("hunger").style.color = h.hunger === "fine" ? "" : "var(--bad)";
   $("gold").textContent = h.gold; $("kills").textContent = h.kills; $("turn").textContent = m.turn;
   const sc = scoreOf(h);
   if (sc > hiscore) { hiscore = sc; try { localStorage.setItem("laya-rogue-hiscore", hiscore); } catch {} }
@@ -312,10 +328,10 @@ setInterval(() => {                       // パネルは 10Hz。毎フレーム
 const cv = $("cv"), g = cv.getContext("2d");
 function resize() {
   const w = cv.parentElement.clientWidth - 8, dpr = devicePixelRatio || 1;
-  T = Math.floor(w / GW);
+  T = Math.floor(w / VIEW_W);
   cv.style.height = T * GH + "px";
   cv.width = w * dpr; cv.height = T * GH * dpr;
-  g.setTransform(dpr, 0, 0, dpr, (w - T * GW) / 2 * dpr, 0);
+  g.setTransform(dpr, 0, 0, dpr, (w - T * VIEW_W) / 2 * dpr, 0);
 }
 addEventListener("resize", resize);
 document.fonts?.ready.then(resize);
@@ -324,7 +340,9 @@ let prev = performance.now();
 function draw(now) {
   const dt = Math.min(.05, (now - prev) / 1000); prev = now;
   g.save();
-  g.fillStyle = "#000"; g.fillRect(-T, 0, T * (GW + 2), T * GH);
+  g.fillStyle = "#000"; g.fillRect(-T, 0, T * (VIEW_W + 2), T * GH);
+  if (heroDraw) camX += (Math.max(0, Math.min(GW - VIEW_W, heroDraw.x - VIEW_W / 2)) - camX) * Math.min(1, dt * 6);
+  g.translate(-camX * T, 0);
   if (shake > 0) { shake = Math.max(0, shake - dt * 2); g.translate((Math.random() - .5) * 14 * shake, (Math.random() - .5) * 14 * shake); }
   if (hero && heroDraw) {
     const k = Math.min(1, dt * 22);
@@ -332,24 +350,28 @@ function draw(now) {
     const flick = 0.92 + 0.08 * Math.sin(now / 90) * Math.sin(now / 37);
 
     for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
-      const t = tiles[y]?.[x]; if (t === undefined || t < 0) continue;
+      const t = tiles[y]?.[x]; if (t === undefined || t <= 0) continue;
+      if (x < camX - 1 || x > camX + VIEW_W + 1) continue;
       const isLit = lit.has(y * GW + x);
       const dist = Math.hypot(x - heroDraw.x, y - heroDraw.y);
       const b = isLit ? Math.max(.18, (1 - dist / 9.5)) * flick : 0.1;
-      if (t === 0) g.fillStyle = isLit ? `rgb(${92 * b + 12},${70 * b + 10},${52 * b + 10})` : "#14151a";
+      const wall = t === 5, passage = t === 3;
+      if (wall) g.fillStyle = isLit ? `rgb(${92 * b + 12},${70 * b + 10},${52 * b + 10})` : "#14151a";
+      else if (passage) g.fillStyle = isLit ? `rgb(${52 * b + 6},${46 * b + 6},${40 * b + 6})` : "#0d0d0f";
       else g.fillStyle = isLit ? `rgb(${70 * b},${58 * b},${44 * b})` : "#0b0c0f";
       g.fillRect(x * T, y * T, T, T);
-      if (t === 0) {                        // レンガ目地。照明色の上に暗い線を重ねるだけなので明るさは保たれる
+      if (wall) {                           // レンガ目地。照明色の上に暗い線を重ねるだけなので明るさは保たれる
         g.fillStyle = "rgba(0,0,0,.34)";
         g.fillRect(x * T, y * T + T - 2, T, 2); g.fillRect(x * T, y * T + (T >> 1) - 1, T, 2);
         g.fillRect(x * T + (T >> 1), y * T, 2, T >> 1); g.fillRect(x * T, y * T + (T >> 1), 2, T >> 1);
-      } else if (isLit) { g.fillStyle = `rgba(255,220,170,${.12 * b})`; g.fillRect(x * T + (T >> 1) - 1, y * T + (T >> 1) - 1, 2, 2); }
+      } else if (isLit && !passage) { g.fillStyle = `rgba(255,220,170,${.12 * b})`; g.fillRect(x * T + (T >> 1) - 1, y * T + (T >> 1) - 1, 2, 2); }
       if (t === 2) glyph(">", x, y, isLit ? "#8fc0c4" : "#2f4a4c", isLit);
+      if (t === 4) glyph("+", x, y, isLit ? "#a9834a" : "#3c3020", false);
     }
-    for (const it of items) glyph(GLYPH[it.kind][0], it.x, it.y, GLYPH[it.kind][1], true);
+    for (const it of items) glyph(ITEM[it.kind][0], it.x, it.y, ITEM[it.kind][1], true);
     for (const mo of monsters.values()) {
       mo.dx += (mo.x - mo.dx) * k; mo.dy += (mo.y - mo.dy) * k;
-      glyph(GLYPH[mo.kind][0], mo.dx, mo.dy, GLYPH[mo.kind][1], true);
+      glyph(mo.ch, mo.dx, mo.dy, monsterColor(mo), mo.awake);
       if (mo.hp < mo.max_hp) { g.fillStyle = "#2a0d0a"; g.fillRect(mo.dx * T + 2, mo.dy * T - 3, T - 4, 3); g.fillStyle = "#b8433a"; g.fillRect(mo.dx * T + 2, mo.dy * T - 3, (T - 4) * mo.hp / mo.max_hp, 3); }
     }
     const hx = heroDraw.x * T + T / 2, hy = heroDraw.y * T + T / 2;

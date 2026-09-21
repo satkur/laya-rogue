@@ -24,11 +24,14 @@ ACTION_DESC = {
     "attack": "Hit the adjacent enemy.",
     "approach": "Move toward the nearest enemy.",
     "flee": "Move away from the enemies.",
-    "drink_potion": "Drink a potion to restore HP.",
+    "quaff_heal": "Drink a healing potion.",
+    "quaff_str": "Drink a strength potion.",
+    "eat": "Eat food.",
     "pick_up": "Walk to the nearest item.",
+    "equip": "Put on the better weapon or armor you carry.",
     "explore": "Walk toward unexplored area.",
     "descend": "Walk to the stairs and go down.",
-    "rest": "Wait a turn to recover a little HP.",
+    "rest": "Wait a turn.",
 }
 
 
@@ -38,9 +41,10 @@ def hp_word(g):
 
 
 def threat_word(g, m):
-    """殴り合ったらどちらが先に倒れるかの見積もり。行動の推奨ではなく、敵の見た目の強さ。"""
-    turns_to_kill = math.ceil(m["hp"] / g.hero_avg())
-    turns_to_die = math.ceil(g.hp / g.monster_avg(m))
+    """殴り合ったらどちらが先に倒れるかの見積もり (本家の命中判定とダメージダイスから計算)。
+    行動の推奨ではなく、敵の見た目の強さ。特殊攻撃 (錆び・凍結・盗みなど) は含まないので、Laya は名前で覚えるしかない。"""
+    turns_to_kill = math.ceil(m["hp"] / max(0.05, g.hero_damage_per_turn(m)))
+    turns_to_die = math.ceil(g.hp / max(0.05, g.monster_damage_per_turn(m)))
     r = turns_to_die / turns_to_kill
     return "weak" if r >= 3 else "even" if r >= 1.5 else "deadly"
 
@@ -49,13 +53,26 @@ def dist_word(d):
     return "adjacent" if d == 1 else "near" if d <= 3 else "far"
 
 
+def count_word(n):
+    return "none" if n == 0 else "one" if n == 1 else "several"
+
+
+def depth_word(d):
+    return "shallow" if d <= 4 else "middle" if d <= 9 else "deep" if d <= 14 else "abyss"
+
+
 def describe(g, valid, order):
     """状況文。数値を避けて語彙を絞ってあるので、同じ状況は同じ文になる (= 経験表のキーになる)。"""
     mons = g.visible_monsters()
     items = g.visible_items()
-    parts = [f"Order: {order}.", f"HP {hp_word(g)}.", "Potions: " + ("none" if g.potions == 0 else "one" if g.potions == 1 else "several") + "."]
+    parts = [f"Order: {order}.", f"Depth: {depth_word(g.depth)}.", f"HP {hp_word(g)}.", f"Hunger: {g.hunger_word()}.",
+             f"Food: {count_word(g.food)}.", f"Healing potions: {count_word(g.has_heal())}."]
+    status = [w for w, on in (("confused", g.confused), ("held", g.held_by is not None), ("weakened", g.str < g.max_str)) if on]
+    if status:
+        parts.append("Status: " + ", ".join(status) + ".")
     if mons:
-        seen = ", ".join(f"{m['kind']} {dist_word(g.dist(m['x'], m['y']))} ({threat_word(g, m)})" for m in mons[:3])
+        seen = ", ".join(f"{m['kind']} {dist_word(g.dist(m['x'], m['y']))} ({threat_word(g, m)}{'' if m['awake'] else ', asleep'})"
+                         for m in mons[:3])
         parts.append(f"Enemies: {seen}" + (f" and {len(mons) - 3} more." if len(mons) > 3 else "."))
     else:
         parts.append("Enemies: none.")
@@ -163,19 +180,27 @@ class RuleBrain:
     def decide(self, g):
         valid = g.valid_actions()
         mons = g.visible_monsters()
+        awake = [m for m in mons if m["awake"]]
         hp = hp_word(g)
         hurt = hp in ("low", "critical")
-        deadly = any(threat_word(g, m) == "deadly" for m in mons)
-        if hurt and "drink_potion" in valid:
-            a = "drink_potion"
-        elif mons and (hurt or deadly) and hp != "full" and "attack" not in valid:
+        deadly = any(threat_word(g, m) == "deadly" for m in awake)
+        a = None
+        if hurt and "quaff_heal" in valid:
+            a = "quaff_heal"
+        elif "quaff_str" in valid and not awake:
+            a = "quaff_str"
+        elif "equip" in valid and not awake:
+            a = "equip"
+        elif "eat" in valid and g.hunger_word() != "fine":
+            a = "eat"
+        elif "attack" in valid and any((m["awake"] or "M" in m["flags"]) and g._adjacent(m) for m in mons):
+            a = "flee" if hp == "critical" and "flee" in valid and "quaff_heal" not in valid and deadly else "attack"
+        elif awake and (hurt or deadly) and "flee" in valid:
             a = "flee"
-        elif "attack" in valid:
-            a = "flee" if hp == "critical" else "attack"
-        elif "approach" in valid:
+        elif "approach" in valid and awake:
             a = "approach"
-        elif "rest" in valid and hp in ("wounded", "low", "critical"):
+        elif not awake and hp in ("wounded", "low", "critical") and g.hunger_word() == "fine":
             a = "rest"
-        else:
-            a = next((x for x in ("pick_up", "explore", "descend") if x in valid), valid[0])
+        if a is None:
+            a = next((x for x in ("pick_up", "explore", "descend") if x in valid), "rest")
         return {"action": a, "probs": {a: 1.0}, "state": "", "ms": 0.0}

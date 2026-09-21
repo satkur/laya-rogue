@@ -1,4 +1,4 @@
-"""Laya Rogue: 人間が命令を出し、Laya が勇者を操作してダンジョンに潜る。
+"""Laya Rogue: 人間が命令を出し、Laya が勇者を操作してダンジョンに潜る。目標は地下 20 階。
 
     uv run server.py            # モデルを読み込み、ブラウザを開く
     uv run server.py --no-open
@@ -35,8 +35,7 @@ async def lifespan(app: FastAPI):
     brain = LayaBrain(gens[-1] if gens else None)
     g = Game(0)
     for _ in range(5):  # 初回の CUDA カーネル準備を済ませておく
-        brain.decide(g)
-        g.step("explore")
+        g.step(brain.decide(g)["action"])
     url = f"http://{HOST}:{PORT}/"
     print(f"準備完了: {brain.agent.device} / 世代 {brain.generation or '未学習'}\n  → {url}", flush=True)
     if "--no-open" not in sys.argv:
@@ -56,9 +55,12 @@ def frame(g, d, log_from):
     return {
         "type": "frame",
         "turn": g.turn,
-        "hero": {"x": g.hx, "y": g.hy, "hp": g.hp, "max_hp": g.max_hp, "level": g.level, "potions": g.potions,
-                 "gold": g.gold, "kills": g.kills, "depth": g.depth},
-        "monsters": [{"id": m["id"], "kind": m["kind"], "x": m["x"], "y": m["y"], "hp": m["hp"], "max_hp": m["max_hp"]} for m in g.visible_monsters()],
+        "hero": {"x": g.hx, "y": g.hy, "hp": g.hp, "max_hp": g.max_hp, "level": g.level, "str": g.str, "max_str": g.max_str,
+                 "ac": g.armor["ac"], "weapon": g.weapon["name"], "armor": g.armor["name"], "food": g.food,
+                 "hunger": g.hunger_word(), "heal": g.has_heal(), "gold": g.gold, "kills": g.kills, "depth": g.depth,
+                 "status": [w for w, on in (("混乱", g.confused), ("拘束", g.held_by is not None), ("行動不能", g.no_command)) if on]},
+        "monsters": [{"id": m["id"], "ch": m["ch"], "x": m["x"], "y": m["y"], "hp": m["hp"], "max_hp": m["max_hp"], "awake": m["awake"]}
+                     for m in g.visible_monsters()],
         "items": [{"kind": i["kind"], "x": i["x"], "y": i["y"]} for i in g.visible_items()],
         "seen": g.newly_seen,
         "visible": [list(p) for p in g.visible],
@@ -79,7 +81,7 @@ async def ws(sock: WebSocket):
             g = Game()
             gen = brain.generation
             depth, log_from = 0, 0
-            while not g.dead and not cfg["restart"]:
+            while not g.over and not cfg["restart"]:
                 while cfg["paused"] and not cfg["step"] and not cfg["restart"]:
                     await asyncio.sleep(0.03)
                 cfg["step"] = False
@@ -93,8 +95,9 @@ async def ws(sock: WebSocket):
                 log_from = len(g.log)
                 await asyncio.sleep(cfg["delay"])
             if not cfg["restart"]:
-                await sock.send_json({"type": "death", "generation": gen, "depth": g.depth, "kills": g.kills, "gold": g.gold, "turn": g.turn, "level": g.level})
-                await asyncio.sleep(2.2)
+                await sock.send_json({"type": "end", "won": g.won, "cause": g.cause, "generation": gen, "depth": g.depth,
+                                      "kills": g.kills, "gold": g.gold, "turn": g.turn, "level": g.level})
+                await asyncio.sleep(3.0)
             cfg["restart"] = False
 
     task = asyncio.create_task(play())

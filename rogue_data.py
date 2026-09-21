@@ -1,0 +1,83 @@
+# Data tables derived from Rogue 5.4.4 (monsters, experience levels, strength bonuses, hunger, items).
+# Copyright (C) 1980-1983, 1985, 1999 Michael Toy, Ken Arnold and Glenn Wichman.
+# Used under the BSD 3-Clause license; see THIRD_PARTY_NOTICES.md.
+# Python implementation (c) 2026 satkur, MIT.
+"""本家 Rogue 5.4.4 の数値表。ルールの実装 (game.py) はこの数値を読むだけで、ここに調整値は置かない。"""
+
+AMULET_LEVEL = 26
+GOAL_DEPTH = 20          # 第 1 段階の目標 (本家のゴールは 26 階の魔除け)
+
+# 空腹 (rogue.h)
+HUNGER_TIME = 1300       # 開始時と、食事 1 回で増える量の基準
+MORE_TIME = 150          # これ未満で weak、2 倍未満で hungry
+STOMACH_SIZE = 2000
+STARVE_TIME = 850        # 0 を割ってからこのターン数で餓死
+
+WANDER_TIME = 70         # 徘徊モンスターの出現間隔の基準 (spread = ±10%)
+MAX_OBJ = 9              # 1 階あたりのアイテム出現試行回数 (各 36%)
+
+# (名前, 日本語名, 持ち物確率, フラグ, 経験値, レベル, 防御, ダメージダイス)
+# フラグ: M=mean (見かけると 2/3 で襲ってくる) F=fly G=greedy I=invisible
+MONSTERS = {
+    "A": ("aquator", "アクエーター", 0, "M", 20, 5, 2, "0x0/0x0"),
+    "B": ("bat", "コウモリ", 0, "F", 1, 1, 3, "1x2"),
+    "C": ("centaur", "ケンタウロス", 15, "", 17, 4, 4, "1x2/1x5/1x5"),
+    "D": ("dragon", "ドラゴン", 100, "M", 5000, 10, -1, "1x8/1x8/3x10"),
+    "E": ("emu", "エミュー", 0, "M", 2, 1, 7, "1x2"),
+    "F": ("venus flytrap", "ハエトリグサ", 0, "M", 80, 8, 3, "%%%x0"),
+    "G": ("griffin", "グリフィン", 20, "MF", 2000, 13, 2, "4x3/3x5"),
+    "H": ("hobgoblin", "ホブゴブリン", 0, "M", 3, 1, 5, "1x8"),
+    "I": ("ice monster", "アイスモンスター", 0, "", 5, 1, 9, "0x0"),
+    "J": ("jabberwock", "ジャバウォック", 70, "", 3000, 15, 6, "2x12/2x4"),
+    "K": ("kestrel", "チョウゲンボウ", 0, "MF", 1, 1, 7, "1x4"),
+    "L": ("leprechaun", "レプラコーン", 0, "", 10, 3, 8, "1x1"),
+    "M": ("medusa", "メデューサ", 40, "M", 200, 8, 2, "3x4/3x4/2x5"),
+    "N": ("nymph", "ニンフ", 100, "", 37, 3, 9, "0x0"),
+    "O": ("orc", "オーク", 15, "G", 5, 1, 6, "1x8"),
+    "P": ("phantom", "ファントム", 0, "I", 120, 8, 3, "4x4"),
+    "Q": ("quagga", "クアッガ", 0, "M", 15, 3, 3, "1x5/1x5"),
+    "R": ("rattlesnake", "ガラガラヘビ", 0, "M", 9, 2, 3, "1x6"),
+    "S": ("snake", "ヘビ", 0, "M", 2, 1, 5, "1x3"),
+    "T": ("troll", "トロル", 50, "M", 120, 6, 4, "1x8/1x8/2x6"),
+    "U": ("black unicorn", "ブラックユニコーン", 0, "M", 190, 7, -2, "1x9/1x9/2x9"),
+    "V": ("vampire", "バンパイア", 20, "M", 350, 8, 1, "1x10"),
+    "W": ("wraith", "レイス", 0, "", 55, 5, 4, "1x6"),
+    "X": ("xeroc", "ゼロック", 30, "", 100, 7, 7, "4x4"),
+    "Y": ("yeti", "イエティ", 30, "", 50, 4, 6, "1x6/1x6"),
+    "Z": ("zombie", "ゾンビ", 0, "M", 6, 2, 8, "1x8"),
+}
+
+# 階ごとの出現順 (monsters.c の lvl_mons)。d = 階 + rnd(10) - 6 番目を引く。徘徊用は一部が出ない (wand_mons)
+LEVEL_MONSTERS = "KEBSHIROZLCQANYFTWPXUMVGJD"
+WANDER_MONSTERS = "KEBSH ROZ CQA Y TWP UMVGJ "
+
+# 経験値がこの値に達するとレベルが上がる (extern.c の e_levels)
+EXP_LEVELS = [10, 20, 40, 80, 160, 320, 640, 1300, 2600, 5200, 13000, 26000, 50000, 100000, 200000,
+              400000, 800000, 2000000, 4000000, 8000000]
+
+# 腕力による命中・ダメージ補正 (fight.c)。添字は腕力の値
+STR_PLUS = [-7, -6, -5, -4, -3, -2, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3]
+ADD_DAM = [-7, -6, -5, -4, -3, -2, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 3, 3, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6]
+
+# 勇者の初期値 (extern.c の INIT_STATS と init.c)
+INIT_STR, INIT_HP = 16, 12
+INIT_WEAPON = ("mace", "2x4", 1, 1)      # 名前, ダメージ, 命中+, ダメージ+
+INIT_ARMOR = ("ring mail", 7 - 1)        # 名前, 防御 (+1 の ring mail)
+
+# 落ちている物の種類の比率 (extern.c の things)
+THING_PROBS = [("potion", 26), ("scroll", 36), ("food", 16), ("weapon", 7), ("armor", 7), ("ring", 4), ("stick", 4)]
+
+# 薬 (pot_info の出現率)。第 1 段階は未識別の仕組みがないので、実装するのは ★ の 4 種だけ
+POTION_PROBS = [("confusion", 7), ("hallucination", 8), ("poison", 8), ("gain strength", 13), ("see invisible", 3),
+                ("healing", 13), ("monster detection", 6), ("magic detection", 6), ("raise level", 2),
+                ("extra healing", 5), ("haste self", 5), ("restore strength", 13), ("blindness", 5), ("levitation", 6)]
+STAGE1_POTIONS = {"healing", "extra healing", "gain strength", "restore strength"}
+
+# 武器 (weap_info の出現率と weapons.c の振り回しダメージ)。第 1 段階は近接武器だけ
+WEAPONS = [("mace", 11, "2x4"), ("long sword", 11, "3x4"), ("short bow", 12, None), ("arrow", 12, None),
+           ("dagger", 8, "1x6"), ("two handed sword", 10, "4x4"), ("dart", 12, None), ("shuriken", 12, None),
+           ("spear", 12, "2x3")]
+
+# 防具 (arm_info の出現率と a_class の防御。防御は小さいほど硬い)
+ARMORS = [("leather armor", 20, 8), ("ring mail", 15, 7), ("studded leather armor", 15, 7), ("scale mail", 13, 6),
+          ("chain mail", 12, 5), ("splint mail", 10, 4), ("banded mail", 10, 4), ("plate mail", 5, 3)]
