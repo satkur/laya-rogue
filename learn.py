@@ -26,7 +26,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-from brain import ORDERS, describe, state_key
+from brain import ORDERS, coarse_key, describe
 from game import Game, avg_dice
 
 DATA = Path(__file__).parent / "data"
@@ -58,8 +58,11 @@ def score(g, order):
             + w["explored"] * g.explored + (100 if g.won else 0) - (w["death"] if g.dead else 0))
 
 
+TEXTS_PER_KEY = 24  # 粗いキー 1 つにつき、Laya の教材として控えておく状況文の数
+
+
 def pick(table, key, valid, rng, temp, eps):
-    q = table.get(key)
+    q = table.get(key, {}).get("q")
     if q is None or rng.random() < eps:
         return rng.choice(valid)
     vals = [q[a][0] for a in valid]
@@ -77,7 +80,7 @@ def rollout(g, action, order, table, seed):
         if sim.over:
             break
         valid = sim.valid_actions()
-        sim.step(pick(table, state_key(describe(sim, valid, order), valid), valid, rng, 0.5, 0.05))
+        sim.step(pick(table, coarse_key(sim, valid, order), valid, rng, 0.5, 0.05))
     return score(sim, order) - before
 
 
@@ -90,7 +93,7 @@ def _init(table):
 
 
 def episode(args):
-    """1 回潜り、調べた局面ごとの (キー, {行動: 平均リターン}) と、階に着いた時点の勇者の状態を返す。"""
+    """1 回潜り、調べた局面ごとの (粗いキー, 状況文, {行動: 平均リターン}) と、階に着いた時点の勇者の状態を返す。"""
     seed, start = args
     rng = random.Random(seed)
     g = Game(rng.randrange(1 << 30), start)
@@ -102,11 +105,11 @@ def episode(args):
             order = rng.choice(ORDERS)
         turns += 1
         valid = g.valid_actions()
-        key = state_key(describe(g, valid, order), valid)
+        key = coarse_key(g, valid, order)
         if len(valid) > 1 and rng.random() < P_EVAL:
             # 行動どうしの比較では同じ乱数列を使う。「運の差」が消えて「行動の差」だけが残る
             seeds = [rng.random() for _ in range(ROLLOUTS)]
-            out.append((key, {a: sum(rollout(g, a, order, _table, s) for s in seeds) / ROLLOUTS for a in valid}))
+            out.append((key, describe(g, valid, order), {a: sum(rollout(g, a, order, _table, s) for s in seeds) / ROLLOUTS for a in valid}))
         g.step(pick(_table, key, valid, rng, 1.0, EPSILON))
         g.log.clear()
         if g.depth != depth and not g.over:
@@ -130,13 +133,13 @@ def main():
     episodes = int(sys.argv[2]) if len(sys.argv) > 2 else 640
     be_nice()
     DATA.mkdir(exist_ok=True)
-    table = {}   # key -> {action: [平均リターン, 重み]}
+    table = {}   # 粗いキー -> {"q": {行動: [平均リターン, 重み]}, "texts": [そのキーで実際に出会った状況文]}
     pool = {}    # 深さ -> 階に着いた時点の勇者の状態
     rng = random.Random(0)
     for r in range(1, rounds + 1):
         t0 = time.perf_counter()
-        for q in table.values():
-            for v in q.values():
+        for entry in table.values():
+            for v in entry["q"].values():
                 v[1] *= DECAY
         jobs = []
         for i in range(episodes):
@@ -149,12 +152,17 @@ def main():
             deepest = max(deepest, depth)
             if fresh:
                 fresh_depths.append(depth)
-            for key, rets in samples:
+            for key, text, rets in samples:
                 n_eval += 1
-                q = table.setdefault(key, {a: [0.0, 0.0] for a in rets})
+                entry = table.setdefault(key, {"q": {a: [0.0, 0.0] for a in rets}, "texts": []})
                 for a, ret in rets.items():
-                    mean, w = q[a]
-                    q[a] = [(mean * w + ret) / (w + 1), w + 1]
+                    mean, w = entry["q"][a]
+                    entry["q"][a] = [(mean * w + ret) / (w + 1), w + 1]
+                if text not in entry["texts"]:
+                    if len(entry["texts"]) < TEXTS_PER_KEY:
+                        entry["texts"].append(text)
+                    else:
+                        entry["texts"][rng.randrange(TEXTS_PER_KEY)] = text
             for h in arrivals:
                 bucket = pool.setdefault(h["depth"], [])
                 if len(bucket) < POOL_PER_DEPTH:

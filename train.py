@@ -24,7 +24,7 @@ from laya.common import build_sequence
 
 DATA = Path(__file__).parent / "data"
 TAU = 1.0          # リターン差 1 点を確率比 e 倍として教える
-MIN_WEIGHT = 0.5   # 経験がこれ未満の状況は教えない (古いラウンドの 1 回きりの経験など)。少ない経験は weight で軽く扱う
+MIN_WEIGHT = 4.0   # 経験がこれ未満の状況は教えない。戦闘は死亡の減点で振れ幅が大きく、数件の平均はあてにならない
 BATCH = 64
 LR = 2e-4
 
@@ -32,7 +32,8 @@ LR = 2e-4
 def load_examples(round_no):
     table = json.loads((DATA / f"table_r{round_no}.json").read_text(encoding="utf-8"))
     out = []
-    for key, q in table.items():
+    for entry in table.values():
+        q = entry["q"]
         w = min(v[1] for v in q.values())
         if w < MIN_WEIGHT:
             continue
@@ -40,7 +41,9 @@ def load_examples(round_no):
         vals = [q[a][0] for a in valid]
         top = max(vals)
         z = [math.exp((v - top) / TAU) for v in vals]
-        out.append({"state": key.split(" | ")[0], "valid": valid, "target": [x / sum(z) for x in z], "weight": math.sqrt(w)})
+        target = [x / sum(z) for x in z]
+        for text in entry["texts"]:  # 表のキーは粗いが、Laya が読むのは詳しい状況文
+            out.append({"state": text, "valid": valid, "target": target, "weight": math.sqrt(w) / len(entry["texts"]) ** 0.5})
     return out
 
 

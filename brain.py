@@ -82,8 +82,28 @@ def describe(g, valid, order):
     return " ".join(parts)
 
 
-def state_key(text, valid):
-    return text + " | " + ",".join(valid)
+def coarse_key(g, valid, order):
+    """経験表のキー。状況文 (describe) よりずっと粗い。
+
+    状況文をそのままキーにすると 2 万種類以上に割れ、肝心の戦闘の状況でも経験が 3〜5 件しか溜まらず、
+    死亡の減点の振れ幅に埋もれて評価がでたらめになった。表は「勝てそうな敵が隣にいる、体力は低い」くらいの
+    粗さで経験を集め、Laya には詳しい状況文を読ませて同じ評価を教える。敵の名前や深さで判断を変えるところまでは、
+    この表からは学べない (第 1 段階の割り切り)。
+    """
+    awake = [m for m in g.visible_monsters() if m["awake"]]
+    asleep = [m for m in g.visible_monsters() if not m["awake"]]
+    if awake:
+        rank = {"weak": 0, "even": 1, "deadly": 2}
+        worst = max(awake, key=lambda m: (rank[threat_word(g, m)], -g.dist(m["x"], m["y"])))
+        enemy = f"{threat_word(g, worst)}-{dist_word(g.dist(worst['x'], worst['y']))}" + ("+" if len(awake) > 1 else "")
+    elif asleep:
+        nearest = asleep[0]
+        enemy = f"asleep-{threat_word(g, nearest)}-{dist_word(g.dist(nearest['x'], nearest['y']))}"
+    else:
+        enemy = "none"
+    hunger = g.hunger_word()
+    flags = "".join(c for c, on in (("H", g.held_by is not None), ("C", g.confused)) if on)
+    return "|".join([order, hp_word(g), "starving" if hunger in ("weak", "fainting") else hunger, enemy, flags, ",".join(valid)])
 
 
 def choose(probs, sharpness, rng):
@@ -149,7 +169,7 @@ class TableBrain:
     def decide(self, g):
         valid = g.valid_actions()
         state = describe(g, valid, self.order)
-        q = self.table.get(state_key(state, valid))
+        q = self.table.get(coarse_key(g, valid, self.order), {}).get("q")
         if q is None:
             a, probs = self.rng.choice(valid), {x: 1 / len(valid) for x in valid}
         else:  # train.py が Laya に教えるのと同じ softmax(平均リターン) を確率として使う
