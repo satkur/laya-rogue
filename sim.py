@@ -4,7 +4,7 @@
 
 頭脳: random / rules / diver / table:<ラウンド> / laya (未学習) / laya:<世代名>
       @<鋭さ> で行動の引き方を変える (@max で常に最有力、既定は 2.5)
-      +llm / +llm:opus で方針役の LLM を付ける (strategist.py。claude -p を呼ぶので 1 ゲーム数分かかり、利用枠を使う)
+      +llm / +llm:sonnet で方針役の LLM を付ける (strategist.py。claude -p を呼ぶので 1 ゲーム数分かかり、利用枠を使う)
 例:   uv run sim.py 40 8000 random rules table:12 laya laya:gen12@max
 """
 import json
@@ -32,7 +32,7 @@ def split_spec(spec):
 
 def split_llm(spec):
     spec, plus, llm = spec.partition("+llm")
-    return spec, (llm[1:] or "sonnet") if plus else None
+    return spec, (llm[1:] or "opus") if plus else None
 
 
 class Locked:

@@ -101,7 +101,7 @@ def situation(g, trigger, st):
     return "\n".join(lines)
 
 
-def ask(text, model="sonnet", effort="low"):
+def ask(text, model="opus", effort="high"):
     """claude -p を 1 回呼ぶ。戻り値は (決定の dict, 秒数, 使用トークン)。失敗したら例外。"""
     if os.environ.get("ANTHROPIC_API_KEY"):
         raise RuntimeError("ANTHROPIC_API_KEY があると従量課金になるので呼ばない")
@@ -128,7 +128,7 @@ total_calls = 0  # プロセス全体の呼び出し回数 (自動停止用)
 class Strategist:
     """1 ゲーム分の方針。check() が「いま呼ぶべき理由」を返し、consult() が呼び、allowed() が選択肢を絞る。"""
 
-    def __init__(self, model="sonnet", effort="low", enabled=True, asker=ask):
+    def __init__(self, model="opus", effort="high", enabled=True, asker=ask):
         self.model, self.effort, self.enabled, self.asker = model, effort, enabled, asker
         self.calls = self.tokens = self.errors = 0
         self.seconds = 0.0

@@ -3,7 +3,7 @@
     uv run server.py            # モデルを読み込み、ブラウザを開く
     uv run server.py --no-open
     uv run server.py --no-llm   # 方針役の LLM (strategist.py、claude -p を呼ぶ) を切った状態で始める
-    uv run server.py --llm-model opus
+    uv run server.py --llm-model sonnet
 """
 import asyncio
 import sys
@@ -23,7 +23,7 @@ from strategist import Masked, Strategist
 HOST, PORT = "127.0.0.1", 8766
 STATIC = Path(__file__).parent / "static"
 brain = None
-LLM_MODEL = sys.argv[sys.argv.index("--llm-model") + 1] if "--llm-model" in sys.argv else "sonnet"
+LLM_MODEL = sys.argv[sys.argv.index("--llm-model") + 1] if "--llm-model" in sys.argv else "opus"
 adviser = Strategist(model=LLM_MODEL, enabled="--no-llm" not in sys.argv)
 strategist_mod.MAX_CALLS_TOTAL = 300  # 画面を開きっぱなしにしても、ここで方針役は自動で止まる (画面で入れ直すと再開)
 
