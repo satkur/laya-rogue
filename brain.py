@@ -24,11 +24,14 @@ ACTION_DESC = {
     "attack": "Hit the adjacent enemy.",
     "approach": "Move toward the nearest enemy.",
     "flee": "Move away from the enemies.",
-    "drink_potion": "Drink a potion to restore HP.",
+    "quaff_heal": "Drink a healing potion.",
+    "quaff_str": "Drink a strength potion.",
+    "eat": "Eat food.",
     "pick_up": "Walk to the nearest item.",
+    "equip": "Put on the better weapon or armor you carry.",
     "explore": "Walk toward unexplored area.",
     "descend": "Walk to the stairs and go down.",
-    "rest": "Wait a turn to recover a little HP.",
+    "rest": "Wait a turn.",
 }
 
 
@@ -38,9 +41,10 @@ def hp_word(g):
 
 
 def threat_word(g, m):
-    """殴り合ったらどちらが先に倒れるかの見積もり。行動の推奨ではなく、敵の見た目の強さ。"""
-    turns_to_kill = math.ceil(m["hp"] / g.hero_avg())
-    turns_to_die = math.ceil(g.hp / g.monster_avg(m))
+    """殴り合ったらどちらが先に倒れるかの見積もり (本家の命中判定とダメージダイスから計算)。
+    行動の推奨ではなく、敵の見た目の強さ。特殊攻撃 (錆び・凍結・盗みなど) は含まないので、Laya は名前で覚えるしかない。"""
+    turns_to_kill = math.ceil(m["hp"] / max(0.05, g.hero_damage_per_turn(m)))
+    turns_to_die = math.ceil(g.hp / max(0.05, g.monster_damage_per_turn(m)))
     r = turns_to_die / turns_to_kill
     return "weak" if r >= 3 else "even" if r >= 1.5 else "deadly"
 
@@ -49,13 +53,26 @@ def dist_word(d):
     return "adjacent" if d == 1 else "near" if d <= 3 else "far"
 
 
+def count_word(n):
+    return "none" if n == 0 else "one" if n == 1 else "several"
+
+
+def depth_word(d):
+    return "shallow" if d <= 4 else "middle" if d <= 9 else "deep" if d <= 14 else "abyss"
+
+
 def describe(g, valid, order):
     """状況文。数値を避けて語彙を絞ってあるので、同じ状況は同じ文になる (= 経験表のキーになる)。"""
     mons = g.visible_monsters()
     items = g.visible_items()
-    parts = [f"Order: {order}.", f"HP {hp_word(g)}.", "Potions: " + ("none" if g.potions == 0 else "one" if g.potions == 1 else "several") + "."]
+    parts = [f"Order: {order}.", f"Depth: {depth_word(g.depth)}.", f"HP {hp_word(g)}.", f"Hunger: {g.hunger_word()}.",
+             f"Food: {count_word(g.food)}.", f"Healing potions: {count_word(g.has_heal())}."]
+    status = [w for w, on in (("confused", g.confused), ("held", g.held_by is not None), ("weakened", g.str < g.max_str)) if on]
+    if status:
+        parts.append("Status: " + ", ".join(status) + ".")
     if mons:
-        seen = ", ".join(f"{m['kind']} {dist_word(g.dist(m['x'], m['y']))} ({threat_word(g, m)})" for m in mons[:3])
+        seen = ", ".join(f"{m['kind']} {dist_word(g.dist(m['x'], m['y']))} ({threat_word(g, m)}{'' if m['awake'] else ', asleep'})"
+                         for m in mons[:3])
         parts.append(f"Enemies: {seen}" + (f" and {len(mons) - 3} more." if len(mons) > 3 else "."))
     else:
         parts.append("Enemies: none.")
@@ -65,8 +82,28 @@ def describe(g, valid, order):
     return " ".join(parts)
 
 
-def state_key(text, valid):
-    return text + " | " + ",".join(valid)
+def coarse_key(g, valid, order):
+    """経験表のキー。状況文 (describe) よりずっと粗い。
+
+    状況文をそのままキーにすると 2 万種類以上に割れ、肝心の戦闘の状況でも経験が 3〜5 件しか溜まらず、
+    死亡の減点の振れ幅に埋もれて評価がでたらめになった。表は「勝てそうな敵が隣にいる、体力は低い」くらいの
+    粗さで経験を集め、Laya には詳しい状況文を読ませて同じ評価を教える。敵の名前や深さで判断を変えるところまでは、
+    この表からは学べない (第 1 段階の割り切り)。
+    """
+    awake = [m for m in g.visible_monsters() if m["awake"]]
+    asleep = [m for m in g.visible_monsters() if not m["awake"]]
+    if awake:
+        rank = {"weak": 0, "even": 1, "deadly": 2}
+        worst = max(awake, key=lambda m: (rank[threat_word(g, m)], -g.dist(m["x"], m["y"])))
+        enemy = f"{threat_word(g, worst)}-{dist_word(g.dist(worst['x'], worst['y']))}" + ("+" if len(awake) > 1 else "")
+    elif asleep:
+        nearest = asleep[0]
+        enemy = f"asleep-{threat_word(g, nearest)}-{dist_word(g.dist(nearest['x'], nearest['y']))}"
+    else:
+        enemy = "none"
+    hunger = g.hunger_word()
+    flags = "".join(c for c, on in (("H", g.held_by is not None), ("C", g.confused)) if on)
+    return "|".join([order, hp_word(g), "starving" if hunger in ("weak", "fainting") else hunger, enemy, flags, ",".join(valid)])
 
 
 def choose(probs, sharpness, rng):
@@ -132,7 +169,7 @@ class TableBrain:
     def decide(self, g):
         valid = g.valid_actions()
         state = describe(g, valid, self.order)
-        q = self.table.get(state_key(state, valid))
+        q = self.table.get(coarse_key(g, valid, self.order), {}).get("q")
         if q is None:
             a, probs = self.rng.choice(valid), {x: 1 / len(valid) for x in valid}
         else:  # train.py が Laya に教えるのと同じ softmax(平均リターン) を確率として使う
@@ -163,19 +200,59 @@ class RuleBrain:
     def decide(self, g):
         valid = g.valid_actions()
         mons = g.visible_monsters()
+        awake = [m for m in mons if m["awake"]]
         hp = hp_word(g)
         hurt = hp in ("low", "critical")
-        deadly = any(threat_word(g, m) == "deadly" for m in mons)
-        if hurt and "drink_potion" in valid:
-            a = "drink_potion"
-        elif mons and (hurt or deadly) and hp != "full" and "attack" not in valid:
+        deadly = any(threat_word(g, m) == "deadly" for m in awake)
+        a = None
+        if hurt and "quaff_heal" in valid:
+            a = "quaff_heal"
+        elif "quaff_str" in valid and not awake:
+            a = "quaff_str"
+        elif "equip" in valid and not awake:
+            a = "equip"
+        elif "eat" in valid and g.hunger_word() != "fine":
+            a = "eat"
+        elif "attack" in valid and any((m["awake"] or "M" in m["flags"]) and g._adjacent(m) for m in mons):
+            a = "flee" if hp == "critical" and "flee" in valid and "quaff_heal" not in valid and deadly else "attack"
+        elif awake and (hurt or deadly) and "flee" in valid:
             a = "flee"
-        elif "attack" in valid:
-            a = "flee" if hp == "critical" else "attack"
-        elif "approach" in valid:
+        elif "approach" in valid and awake:
             a = "approach"
-        elif "rest" in valid and hp in ("wounded", "low", "critical"):
+        elif not awake and hp in ("wounded", "low", "critical") and g.hunger_word() == "fine":
+            a = "rest"
+        if a is None:
+            a = next((x for x in ("pick_up", "explore", "descend") if x in valid), "rest")
+        return {"action": a, "probs": {a: 1.0}, "state": "", "ms": 0.0}
+
+
+class DiverBrain:
+    """人間が書いた if 文その 2。階段を見つけたらすぐ降り、こまめに休み、眠っている敵も倒す。いまのところ最良の物差し。"""
+
+    name = "diver"
+
+    def decide(self, g):
+        valid = g.valid_actions()
+        mons = g.visible_monsters()
+        awake = [m for m in mons if m["awake"]]
+        hp = hp_word(g)
+        hurt = hp in ("low", "critical")
+        if hurt and "quaff_heal" in valid:
+            a = "quaff_heal"
+        elif "eat" in valid and g.hunger_word() != "fine":
+            a = "eat"
+        elif not awake and "quaff_str" in valid:
+            a = "quaff_str"
+        elif not awake and "equip" in valid:
+            a = "equip"
+        elif "attack" in valid:
+            a = "attack"
+        elif awake and "descend" in valid and not hurt:
+            a = "descend"
+        elif awake and "approach" in valid:
+            a = "approach"
+        elif not awake and hp in ("wounded", "low", "critical") and g.hunger_word() == "fine":
             a = "rest"
         else:
-            a = next((x for x in ("pick_up", "explore", "descend") if x in valid), valid[0])
+            a = next((x for x in ("pick_up", "descend", "explore") if x in valid), "rest")
         return {"action": a, "probs": {a: 1.0}, "state": "", "ms": 0.0}
