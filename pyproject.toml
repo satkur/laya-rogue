@@ -1,0 +1,20 @@
+[project]
+name = "laya-rogue"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "laya>=0.3.3",
+    "torch>=2.7.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+]
+
+# RTX 50 系 (Blackwell, sm_120) は CUDA 12.8 以降のビルドが必須。
+# PyPI の素の torch は Windows では CPU 版なので、必ずこの index から取る。
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }

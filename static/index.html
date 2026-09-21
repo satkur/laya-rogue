@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LAYA ROGUE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
+<style>
+  /* 80〜90年代の国産 PC 風: 16 色パレット・ドットフォント・枠線ウィンドウ。
+     ダンジョンの照明 (canvas 内) だけは当時の制約を無視してそのまま残している。 */
+  :root {
+    --black: #000; --navy: #0000aa; --cyan: #55ffff; --white: #fff; --gray: #aaaaaa; --dgray: #555577;
+    --yellow: #ffff55; --green: #55ff55; --red: #ff5555; --magenta: #ff55ff;
+    --font: "DotGothic16", "MS Gothic", "ＭＳ ゴシック", monospace;
+  }
+  * { box-sizing: border-box; border-radius: 0 !important; }
+  html { background: #00000c; }
+  body { margin: 0; min-height: 100vh; padding-bottom: 44px; background: #00000c; color: var(--white); font: 16px/1.4 var(--font);
+         text-shadow: 0 0 5px rgba(140, 220, 255, .28); -webkit-font-smoothing: none; }
+  body::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 50;
+    background: radial-gradient(ellipse at center, transparent 62%, rgba(0, 0, 0, .5) 100%); }
+
+  header { display: flex; align-items: center; gap: 16px; padding: 3px 12px; background: var(--navy); color: var(--white); }
+  header h1 { font: 400 16px/1.4 var(--font); margin: 0; letter-spacing: .12em; }
+  header h1 span { color: var(--yellow); }
+  header .ver { color: var(--cyan); }
+  header .spacer { flex: 1; }
+  #device { color: var(--cyan); }
+
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 12px; padding: 12px; align-items: start; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+
+  fieldset { border: 2px solid var(--cyan); margin: 0; padding: 6px 10px 10px; min-width: 0; background: var(--black);
+             box-shadow: 4px 4px 0 #003344; }
+  legend { padding: 0 8px; color: var(--black); background: var(--cyan); text-shadow: none; }
+  legend em { font-style: normal; background: var(--black); color: var(--yellow); padding: 0 6px; margin-left: 8px; }
+
+  .stage { position: relative; padding: 4px; }
+  canvas { display: block; width: 100%; image-rendering: pixelated; }
+  #died { position: absolute; inset: 4px; display: grid; place-items: center; pointer-events: none; visibility: hidden; background: rgba(60, 0, 0, .5); }
+  #died.show { visibility: visible; }
+  #died div { text-align: center; font: 400 72px/1.1 var(--font); letter-spacing: .1em; color: var(--red); text-shadow: 4px 4px 0 #550000; }
+  #died.show div { animation: blink 0.8s steps(1) infinite; }
+  #died small { display: block; font: 16px/1.6 var(--font); letter-spacing: 0; color: var(--white); text-shadow: 2px 2px 0 #000; margin-top: 12px; animation: none; }
+  @keyframes blink { 50% { color: #aa0000; } }
+
+  aside { display: grid; gap: 12px; }
+  .bar { height: 14px; --c: var(--green); background: repeating-linear-gradient(90deg, #222233 0 7px, transparent 7px 9px); margin: 4px 0 8px; }
+  .bar i { display: block; height: 100%; width: 100%; background: repeating-linear-gradient(90deg, var(--c) 0 7px, transparent 7px 9px); }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0 10px; }
+  .cell { display: flex; flex-direction: column-reverse; padding: 2px 0; border-top: 1px dotted var(--dgray); }
+  .cell .v { color: var(--yellow); font-size: 20px; line-height: 1.2; }
+  .cell .k { color: var(--gray); font-size: 14px; }
+
+  #state { color: var(--green); min-height: 46px; margin-bottom: 6px; }
+  #state::before { content: "A>"; color: var(--gray); margin-right: 6px; }
+  .act { display: grid; grid-template-columns: 16px 58px 1fr 44px; gap: 6px; align-items: center; padding: 1px 2px; }
+  .act .mark { color: var(--yellow); }
+  .act .name { color: var(--cyan); }
+  .act .track { height: 12px; background: repeating-linear-gradient(90deg, #222233 0 5px, transparent 5px 7px); }
+  .act .fill { height: 100%; background: repeating-linear-gradient(90deg, var(--gray) 0 5px, transparent 5px 7px); }
+  .act .pct { text-align: right; color: var(--gray); }
+  .act .why { grid-column: 2 / -1; font-size: 14px; line-height: 1.25; color: var(--gray); margin-bottom: 3px; }
+  .act .why b { font-weight: 400; color: var(--green); } .act .why b.bad { color: var(--red); } .act .why b.fine { color: var(--white); }
+  .act.done { background: var(--navy); }
+  .act.done .name, .act.done .pct { color: var(--yellow); }
+  .act.done .fill { background: repeating-linear-gradient(90deg, var(--yellow) 0 5px, transparent 5px 7px); }
+  .act.vetoed .name, .act.vetoed .pct, .act.vetoed .mark { color: var(--red); }
+  .act.vetoed .fill { background: repeating-linear-gradient(90deg, var(--red) 0 5px, transparent 5px 7px); }
+  #veto { color: var(--red); min-height: 22px; font-size: 14px; }
+  #log { color: var(--gray); height: 136px; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
+  #log div::before { content: "・"; }
+  #log div:last-child { color: var(--white); }
+
+  /* 画面下のファンクションキーバー */
+  footer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--black); border-top: 2px solid var(--cyan); }
+  footer button { font: 16px/1.2 var(--font); background: var(--black); color: var(--white); border: 0; padding: 2px 10px 2px 0; cursor: pointer; }
+  footer button kbd { font: inherit; background: var(--cyan); color: var(--black); padding: 1px 6px; margin-right: 8px; text-shadow: none; }
+  footer button:hover { color: var(--cyan); }
+  footer button.on { color: var(--yellow); }
+  footer button.on kbd { background: var(--yellow); }
+  footer .spacer { flex: 1; }
+  footer label { display: flex; align-items: center; gap: 8px; color: var(--cyan); }
+  footer label b { font-weight: 400; color: var(--yellow); min-width: 84px; }
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 180px; height: 14px; background: repeating-linear-gradient(90deg, var(--dgray) 0 4px, transparent 4px 8px); outline: none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 20px; background: var(--yellow); cursor: pointer; }
+  input[type=range]::-moz-range-thumb { width: 12px; height: 20px; background: var(--yellow); border: 0; cursor: pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>LAYA <span>ROGUE</span></h1><span class="ver">Ver 1.00</span>
+  <div class="spacer"></div>
+  <div id="device">接続中…</div>
+</header>
+<main>
+  <fieldset class="stage">
+    <legend>DUNGEON<em id="depth">B1F</em></legend>
+    <canvas id="cv"></canvas>
+    <div id="died"><div>LAYA DIED<small id="diedSub"></small></div></div>
+  </fieldset>
+  <aside>
+    <fieldset>
+      <legend>勇者</legend>
+      <div class="bar" id="hpbar"><i id="hp"></i></div>
+      <div class="grid">
+        <div class="cell"><div class="v" id="hpv">–</div><div class="k">HP</div></div>
+        <div class="cell"><div class="v" id="lv">1</div><div class="k">レベル</div></div>
+        <div class="cell"><div class="v" id="pot">0</div><div class="k">回復薬</div></div>
+        <div class="cell"><div class="v" id="gold">0</div><div class="k">金貨</div></div>
+        <div class="cell"><div class="v" id="kills">0</div><div class="k">撃破</div></div>
+        <div class="cell"><div class="v" id="turn">0</div><div class="k">ターン</div></div>
+        <div class="cell"><div class="v" id="best">1</div><div class="k">最深記録</div></div>
+        <div class="cell"><div class="v" id="runs">0</div><div class="k">死亡回数</div></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>LAYA の判断<em id="ms">– ms</em></legend>
+      <div id="state"></div>
+      <div id="acts"></div>
+      <div id="veto"></div>
+      <div class="grid">
+        <div class="cell"><div class="v" id="rate">0</div><div class="k">手/秒</div></div>
+        <div class="cell"><div class="v" id="agree">–</div><div class="k">Best選択</div></div>
+        <div class="cell"><div class="v" id="vetoRate">–</div><div class="k">介入</div></div>
+        <div class="cell"><div class="v">0</div><div class="k">生成token</div></div>
+      </div>
+    </fieldset>
+    <fieldset><legend>ログ</legend><div id="log"></div></fieldset>
+  </aside>
+</main>
+<footer>
+  <button id="pause"><kbd>SPACE</kbd><span>一時停止</span></button>
+  <button id="step"><kbd>.</kbd>1手進める</button>
+  <button id="guard" class="on" title="Laya が Bad. の行動を選んだら安全な行動に差し替える"><kbd>G</kbd><span>安全装置 ON</span></button>
+  <button id="restart"><kbd>R</kbd>最初から</button>
+  <div class="spacer"></div>
+  <label>SPEED <input type="range" id="speed" min="0" max="100" value="62"> <b id="speedv"></b></label>
+</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+const JP = { attack: "攻撃", approach: "接近", flee: "逃走", drink_potion: "回復薬", pick_up: "回収", explore: "探索", descend: "階段へ", rest: "休憩" };
+const ORDER = Object.keys(JP);
+const GLYPH = { rat: ["r", "#c8843c"], goblin: ["g", "#55ff55"], ogre: ["O", "#ff5555"], potion: ["!", "#ff55ff"], gold: ["$", "#ffff55"] };
+const FONT = '"DotGothic16", "MS Gothic", monospace';
+
+let GW = 48, GH = 26, T = 20;
+let tiles = [], lit = new Set(), hero = null, heroDraw = null, monsters = new Map(), items = [], floats = [], danger = 0, shake = 0, flash = 0;
+const stats = { stamps: [], ms: [], n: 0, agree: 0, veto: 0, best: 1, runs: 0 };
+
+// ---------------------------------------------------------------- websocket
+const ws = new WebSocket(`ws://${location.host}/ws`);
+const send = o => ws.readyState === 1 && ws.send(JSON.stringify(o));
+ws.onclose = () => { $("device").textContent = "切断されました（server.py を再起動してください）"; };
+ws.onmessage = ev => {
+  const m = JSON.parse(ev.data);
+  if (m.type === "hello") { GW = m.w; GH = m.h; $("device").textContent = ""; resize(); pushConfig(); }
+  else if (m.type === "floor") { tiles = Array.from({ length: GH }, () => new Array(GW).fill(-1)); monsters.clear(); hero = null; heroDraw = null; $("died").classList.remove("show"); }
+  else if (m.type === "frame") onFrame(m);
+  else if (m.type === "death") {
+    stats.runs++; shake = 1;
+    $("diedSub").textContent = `B${m.depth}F / Lv${m.level} / 撃破 ${m.kills} / 金貨 ${m.gold} / ${m.turn} ターン`;
+    $("died").classList.add("show");
+  }
+};
+
+// ---------------------------------------------------------------- controls
+let paused = false, guarded = true;
+function delayFromSlider() { const v = +$("speed").value; return v >= 100 ? 0 : Math.pow(1 - v / 100, 2.2) * 1.0; }
+function pushConfig() {
+  const d = delayFromSlider();
+  $("speedv").textContent = d === 0 ? "MAX" : `${(1 / (d + 0.02)).toFixed(d > 0.2 ? 1 : 0)} 手/秒`;
+  send({ type: "config", delay: d, paused, guarded });
+}
+$("speed").oninput = pushConfig;
+$("pause").onclick = () => { paused = !paused; $("pause").classList.toggle("on", paused); $("pause").querySelector("span").textContent = paused ? "再開" : "一時停止"; pushConfig(); };
+$("step").onclick = () => { if (!paused) $("pause").onclick(); send({ type: "step" }); };
+$("guard").onclick = () => { guarded = !guarded; $("guard").classList.toggle("on", guarded); $("guard").querySelector("span").textContent = guarded ? "安全装置 ON" : "安全装置 OFF"; pushConfig(); };
+$("restart").onclick = () => send({ type: "restart" });
+addEventListener("keydown", e => {
+  if (e.code === "Space") { e.preventDefault(); $("pause").onclick(); }
+  else if (e.key === ".") $("step").onclick();
+  else if (e.key === "g" || e.key === "G") $("guard").onclick();
+  else if (e.key === "r" || e.key === "R") $("restart").onclick();
+});
+
+// ---------------------------------------------------------------- frame
+let pendingPanel = null;
+function onFrame(m) {
+  for (const [x, y, t] of m.seen) tiles[y][x] = t;
+  lit = new Set(m.visible.map(([x, y]) => y * GW + x));
+  items = m.items;
+
+  if (hero && m.hero.hp < hero.hp) { floats.push({ x: m.hero.x, y: m.hero.y, text: "-" + (hero.hp - m.hero.hp), c: "#ff5555", life: 0.7 }); flash = 1; }
+  if (hero && m.hero.hp > hero.hp + 2) floats.push({ x: m.hero.x, y: m.hero.y, text: "+" + (m.hero.hp - hero.hp), c: "#55ff55", life: 0.8 });
+  const seenIds = new Set();
+  for (const mo of m.monsters) {
+    seenIds.add(mo.id);
+    const old = monsters.get(mo.id);
+    if (old && mo.hp < old.hp) floats.push({ x: mo.x, y: mo.y, text: "-" + (old.hp - mo.hp), c: "#ffff55", life: 0.6 });
+    monsters.set(mo.id, { ...mo, dx: old ? old.dx : mo.x, dy: old ? old.dy : mo.y });
+  }
+  for (const [id, old] of monsters) if (!seenIds.has(id)) {
+    if (Math.max(Math.abs(old.x - m.hero.x), Math.abs(old.y - m.hero.y)) <= 1 && m.decision.action === "attack")
+      for (let k = 0; k < 10; k++) floats.push({ x: old.x, y: old.y, vx: (Math.random() - .5) * 5, vy: (Math.random() - .5) * 5, text: "*", c: GLYPH[old.kind][1], life: 0.45 });
+    monsters.delete(id);
+  }
+  hero = m.hero;
+  if (!heroDraw) heroDraw = { x: hero.x, y: hero.y };
+  danger += (m.decision.danger - danger) * 0.35;
+
+  const d = m.decision, now = performance.now();
+  stats.stamps.push(now); stats.ms.push(d.ms); if (stats.ms.length > 120) stats.ms.shift();
+  stats.n++; stats.agree += d.proposed === d.best; stats.veto += d.intervened;
+  stats.best = Math.max(stats.best, hero.depth);
+  for (const line of m.log) { const el = document.createElement("div"); el.textContent = line; $("log").appendChild(el); }
+  while ($("log").children.length > 6) $("log").firstChild.remove();
+  pendingPanel = m;
+}
+
+setInterval(() => {                       // パネルは 10Hz。毎フレーム書き換えると読めない
+  const now = performance.now();
+  stats.stamps = stats.stamps.filter(s => now - s < 1000);
+  $("rate").textContent = stats.stamps.length;
+  if (stats.ms.length) { const s = [...stats.ms].sort((a, b) => a - b); $("ms").textContent = `${s[s.length >> 1].toFixed(1)} ms`; }
+  if (stats.n) { $("agree").textContent = Math.round(stats.agree / stats.n * 100) + "%"; $("vetoRate").textContent = (stats.veto / stats.n * 100).toFixed(1) + "%"; }
+  $("best").textContent = `B${stats.best}F`; $("runs").textContent = stats.runs;
+  const m = pendingPanel; if (!m) return; pendingPanel = null;
+  const h = m.hero, f = h.hp / h.max_hp;
+  $("depth").textContent = `B${h.depth}F`;
+  $("hp").style.width = f * 100 + "%"; $("hpbar").style.setProperty("--c", f <= .25 ? "var(--red)" : f <= .5 ? "var(--yellow)" : "var(--green)");
+  $("hpv").textContent = `${h.hp}/${h.max_hp}`; $("lv").textContent = h.level; $("pot").textContent = h.potions;
+  $("gold").textContent = h.gold; $("kills").textContent = h.kills; $("turn").textContent = m.turn;
+  const d = m.decision;
+  $("state").textContent = d.state;
+  const acts = ORDER.filter(a => a in d.probs);
+  $("acts").innerHTML = acts.map(a => {
+    const c = d.criteria?.[a] ?? "", tag = c.split(".")[0], rest = c.slice(tag.length + 1);
+    const vetoed = a === d.proposed && d.intervened;
+    const cls = a === d.action ? "done" : vetoed ? "vetoed" : "";
+    return `<div class="act ${cls}"><span class="mark">${a === d.action ? "▶" : vetoed ? "×" : ""}</span><span class="name">${JP[a]}</span>`
+      + `<div class="track"><div class="fill" style="width:${(d.probs[a] * 100).toFixed(1)}%"></div></div><span class="pct">${Math.round(d.probs[a] * 100)}%</span>`
+      + `<div class="why"><b class="${tag === "Bad" ? "bad" : tag === "Fine" ? "fine" : ""}">${tag}.</b>${rest.replace(/</g, "&lt;")}</div></div>`;
+  }).join("");
+  $("veto").textContent = d.intervened ? `！安全装置が介入: 「${JP[d.proposed]}」→「${JP[d.action]}」` : "";
+}, 100);
+
+// ---------------------------------------------------------------- canvas
+const cv = $("cv"), g = cv.getContext("2d");
+function resize() {
+  const w = cv.parentElement.clientWidth - 8, dpr = devicePixelRatio || 1;
+  T = Math.floor(w / GW);
+  cv.style.height = T * GH + "px";
+  cv.width = w * dpr; cv.height = T * GH * dpr;
+  g.setTransform(dpr, 0, 0, dpr, (w - T * GW) / 2 * dpr, 0);
+}
+addEventListener("resize", resize);
+document.fonts?.ready.then(resize);
+
+let prev = performance.now();
+function draw(now) {
+  const dt = Math.min(.05, (now - prev) / 1000); prev = now;
+  g.save();
+  g.fillStyle = "#000"; g.fillRect(-T, 0, T * (GW + 2), T * GH);
+  if (shake > 0) { shake = Math.max(0, shake - dt * 2); g.translate((Math.random() - .5) * 14 * shake, (Math.random() - .5) * 14 * shake); }
+  if (hero && heroDraw) {
+    const k = Math.min(1, dt * 22);
+    heroDraw.x += (hero.x - heroDraw.x) * k; heroDraw.y += (hero.y - heroDraw.y) * k;
+    const flick = 0.92 + 0.08 * Math.sin(now / 90) * Math.sin(now / 37);
+
+    for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+      const t = tiles[y]?.[x]; if (t === undefined || t < 0) continue;
+      const isLit = lit.has(y * GW + x);
+      const dist = Math.hypot(x - heroDraw.x, y - heroDraw.y);
+      const b = isLit ? Math.max(.18, (1 - dist / 9.5)) * flick : 0.1;
+      if (t === 0) g.fillStyle = isLit ? `rgb(${92 * b + 12},${70 * b + 10},${52 * b + 10})` : "#14151a";
+      else g.fillStyle = isLit ? `rgb(${70 * b},${58 * b},${44 * b})` : "#0b0c0f";
+      g.fillRect(x * T, y * T, T, T);
+      if (t === 0) {                        // レンガ目地。照明色の上に暗い線を重ねるだけなので明るさは保たれる
+        g.fillStyle = "rgba(0,0,0,.34)";
+        g.fillRect(x * T, y * T + T - 2, T, 2); g.fillRect(x * T, y * T + (T >> 1) - 1, T, 2);
+        g.fillRect(x * T + (T >> 1), y * T, 2, T >> 1); g.fillRect(x * T, y * T + (T >> 1), 2, T >> 1);
+      } else if (isLit) { g.fillStyle = `rgba(255,220,170,${.12 * b})`; g.fillRect(x * T + (T >> 1) - 1, y * T + (T >> 1) - 1, 2, 2); }
+      if (t === 2) glyph(">", x, y, isLit ? "#55ffff" : "#1f5a66", isLit);
+    }
+    for (const it of items) glyph(GLYPH[it.kind][0], it.x, it.y, GLYPH[it.kind][1], true);
+    for (const mo of monsters.values()) {
+      mo.dx += (mo.x - mo.dx) * k; mo.dy += (mo.y - mo.dy) * k;
+      glyph(GLYPH[mo.kind][0], mo.dx, mo.dy, GLYPH[mo.kind][1], true);
+      if (mo.hp < mo.max_hp) { g.fillStyle = "#400"; g.fillRect(mo.dx * T + 2, mo.dy * T - 3, T - 4, 3); g.fillStyle = "#ff5555"; g.fillRect(mo.dx * T + 2, mo.dy * T - 3, (T - 4) * mo.hp / mo.max_hp, 3); }
+    }
+    const hx = heroDraw.x * T + T / 2, hy = heroDraw.y * T + T / 2;
+    const glow = g.createRadialGradient(hx, hy, 0, hx, hy, T * 5);
+    glow.addColorStop(0, "rgba(255,180,80,.20)"); glow.addColorStop(1, "rgba(255,180,80,0)");
+    g.fillStyle = glow; g.fillRect(hx - T * 5, hy - T * 5, T * 10, T * 10);
+    glyph("@", heroDraw.x, heroDraw.y, flash > 0 ? "#ff5555" : "#ffff55", true, true);
+    flash = Math.max(0, flash - dt * 5);
+  }
+  for (let i = floats.length - 1; i >= 0; i--) {
+    const f = floats[i]; f.life -= dt; if (f.life <= 0) { floats.splice(i, 1); continue; }
+    f.x += (f.vx || 0) * dt; f.y += (f.vy ?? -1.6) * dt;
+    g.globalAlpha = f.life > 0.15 ? 1 : 0.5; g.fillStyle = f.c; g.font = `${T}px ${FONT}`; g.textAlign = "center";
+    g.fillText(f.text, f.x * T + T / 2, f.y * T + T / 2);
+  }
+  g.globalAlpha = 1;
+  g.restore();
+  if (danger > 0.08) {                     // Laya の「死の危険」確率を赤いビネットで見せる
+    const W_ = cv.clientWidth, H_ = T * GH, pulse = 0.75 + 0.25 * Math.sin(now / (260 - danger * 160));
+    const v = g.createRadialGradient(W_ / 2, H_ / 2, H_ * .35, W_ / 2, H_ / 2, H_ * .95);
+    v.addColorStop(0, "rgba(160,0,0,0)"); v.addColorStop(1, `rgba(190,10,10,${Math.min(.75, danger * .8) * pulse})`);
+    g.fillStyle = v; g.fillRect(-T, 0, W_ + T * 2, H_);
+  }
+  requestAnimationFrame(draw);
+}
+function glyph(ch, x, y, color, bright, bold) {
+  g.font = `${Math.round(T * (bold ? 1.1 : 1))}px ${FONT}`; g.textAlign = "center"; g.textBaseline = "middle";
+  if (bright) { g.shadowColor = color; g.shadowBlur = bold ? 14 : 7; }
+  g.fillStyle = color; g.fillText(ch, x * T + T / 2, y * T + T / 2);
+  g.shadowBlur = 0; g.textBaseline = "alphabetic";
+}
+resize();
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
