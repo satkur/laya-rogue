@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 
 WEIGHTS = Path(__file__).parent / "weights"
+TAU = 0.3  # 経験表の評価を確率に直すときの温度。行動 1 つぶんの評価差は 0.3〜1 点と小さいので、1.0 だとほぼ一様になってしまう
 INSTRUCTIONS = "You are the hero of a dungeon crawl. Choose the next action."
 ACTION_DESC = {
     "attack": "Hit the adjacent enemy.",
@@ -180,7 +181,7 @@ class TableBrain:
             a, probs = self.rng.choice(valid), {x: 1 / len(valid) for x in valid}
         else:  # train.py が Laya に教えるのと同じ softmax(平均リターン) を確率として使う
             top = max(q[x][0] for x in valid)
-            z = {x: math.exp(q[x][0] - top) for x in valid}
+            z = {x: math.exp((q[x][0] - top) / TAU) for x in valid}
             probs = {x: v / sum(z.values()) for x, v in z.items()}
             a = choose(probs, self.sharpness, self.rng)
         return {"action": a, "probs": probs, "state": state, "ms": 0.0, "miss": q is None}

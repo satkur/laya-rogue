@@ -27,7 +27,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-from brain import coarse_key, describe
+from brain import TAU, coarse_key, describe
 from game import Game, avg_dice
 
 DATA = Path(__file__).parent / "data"
@@ -38,7 +38,8 @@ MAX_TURNS = 3000
 EPSILON = 0.15      # 表を無視して気まぐれに動く確率 (知らない局面に出会うため)
 DECAY = 0.5         # ラウンドをまたぐとき、古い経験の重みをこれだけ残す
 GAMMA = 0.85        # 先読みの終点から先の見込みを、どれだけ割り引いて足すか (0 で足さない)
-ROLL_TEMP = 0.5     # 先読みの中での行動の選び方 (softmax の温度)
+ROLL_TEMP = 0.2     # 先読みの中での行動の選び方 (softmax の温度)
+COMMIT = 10         # 調べる行動は、状況 (粗いキー) が変わるまで最大このターン数だけ続ける。「休む」のように 1 回では差が出ない行動の価値を測るため
 P_CONTINUE = 0.6    # 控えておいた「階に着いた時点の状態」から始めるエピソードの割合
 POOL_PER_DEPTH = 300
 
@@ -83,12 +84,20 @@ def rollout(g, action, table, v_default, seed):
     rng = random.Random(seed)
     sim = g.clone(seed)
     before = score(sim)
+    key0 = coarse_key(sim, sim.valid_actions())
     sim.step(action)
+    committed = 1
     for _ in range(HORIZON - 1):
         if sim.over:
             break
         valid = sim.valid_actions()
-        sim.step(pick(table, coarse_key(sim, valid), valid, rng, ROLL_TEMP, 0.05))
+        key = coarse_key(sim, valid)
+        if committed and committed < COMMIT and key == key0:
+            committed += 1
+            sim.step(action)
+            continue
+        committed = 0
+        sim.step(pick(table, key, valid, rng, ROLL_TEMP, 0.05))
     ret = score(sim) - before
     if GAMMA and not sim.over:  # 死んだらその先は 0。生きていれば、終点の状況の見込みを足す
         valid = sim.valid_actions()
@@ -120,7 +129,7 @@ def episode(args):
             # 行動どうしの比較では同じ乱数列を使う。「運の差」が消えて「行動の差」だけが残る
             seeds = [rng.random() for _ in range(ROLLOUTS)]
             out.append((key, describe(g, valid), {a: sum(rollout(g, a, _table, _v_default, s) for s in seeds) / ROLLOUTS for a in valid}))
-        g.step(pick(_table, key, valid, rng, 1.0, EPSILON))
+        g.step(pick(_table, key, valid, rng, TAU, EPSILON))
         g.log.clear()
         if g.depth != depth and not g.over:
             depth = g.depth
