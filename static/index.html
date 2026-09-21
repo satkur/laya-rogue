@@ -8,95 +8,96 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
 <style>
-  /* 80〜90年代の国産 PC 風: 16 色パレット・ドットフォント・枠線ウィンドウ。
-     ダンジョンの照明 (canvas 内) だけは当時の制約を無視してそのまま残している。 */
+  /* 80〜90年代のレトロ PC 風の構成 (ドットフォント・枠線ウィンドウ) に、ファンタジー RPG の配色。
+     古びた金の枠、羊皮紙色の文字、暗い石の地。色数は絞り、赤と緑は体力と危険にだけ使う。 */
   :root {
-    --black: #000; --navy: #0000aa; --cyan: #55ffff; --white: #fff; --gray: #aaaaaa; --dgray: #555577;
-    --yellow: #ffff55; --green: #55ff55; --red: #ff5555; --magenta: #ff55ff;
+    --bg: #0b0907; --panel: #12100c; --frame: #8a6d3b; --frame-hi: #c9a45c; --sel: #33201a;
+    --text: #e6d9b8; --dim: #958a6c; --faint: #4a4232; --track: #241f17;
+    --accent: #dcb65a; --ok: #7fa35f; --warn: #d19a3e; --bad: #b8433a;
     --font: "DotGothic16", "MS Gothic", "ＭＳ ゴシック", monospace;
   }
   * { box-sizing: border-box; border-radius: 0 !important; }
-  html { background: #00000c; }
-  body { margin: 0; min-height: 100vh; padding-bottom: 80px; background: #00000c; color: var(--white); font: 16px/1.4 var(--font);
-         text-shadow: 0 0 5px rgba(140, 220, 255, .28); -webkit-font-smoothing: none; }
+  html { background: var(--bg); }
+  body { margin: 0; min-height: 100vh; padding-bottom: 80px; background: var(--bg); color: var(--text); font: 16px/1.4 var(--font);
+         text-shadow: 0 0 4px rgba(220, 170, 90, .18); -webkit-font-smoothing: none; }
   body::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 50;
     background: radial-gradient(ellipse at center, transparent 62%, rgba(0, 0, 0, .5) 100%); }
 
-  header { display: flex; align-items: center; gap: 16px; padding: 3px 12px; background: var(--navy); color: var(--white); }
+  header { display: flex; align-items: center; gap: 16px; padding: 3px 12px; background: #1d140e; color: var(--text); border-bottom: 2px solid var(--frame); }
   header h1 { font: 400 16px/1.4 var(--font); margin: 0; letter-spacing: .12em; }
-  header h1 span { color: var(--yellow); }
-  header .ver { color: var(--cyan); }
+  header h1 span { color: var(--accent); }
+  header .ver { color: var(--frame-hi); }
   header .spacer { flex: 1; }
-  #device { color: var(--cyan); }
+  #device { color: var(--frame-hi); }
 
   main { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 12px; padding: 12px; align-items: start; }
   @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
 
-  fieldset { border: 2px solid var(--cyan); margin: 0; padding: 6px 10px 10px; min-width: 0; background: var(--black);
-             box-shadow: 4px 4px 0 #003344; }
-  legend { padding: 0 8px; color: var(--black); background: var(--cyan); text-shadow: none; }
-  legend em { font-style: normal; background: var(--black); color: var(--yellow); padding: 0 6px; margin-left: 8px; }
+  fieldset { border: 2px solid var(--frame); margin: 0; padding: 6px 10px 10px; min-width: 0; background: var(--panel);
+             box-shadow: 4px 4px 0 #050403; }
+  legend { padding: 0 8px; color: #140f08; background: var(--frame); text-shadow: none; }
+  legend em { font-style: normal; background: var(--panel); color: var(--accent); padding: 0 6px; margin-left: 8px; }
 
   .stage { position: relative; padding: 4px; }
   canvas { display: block; width: 100%; image-rendering: pixelated; }
-  #died { position: absolute; inset: 4px; display: grid; place-items: center; pointer-events: none; visibility: hidden; background: rgba(60, 0, 0, .5); }
+  #died { position: absolute; inset: 4px; display: grid; place-items: center; pointer-events: none; visibility: hidden; background: rgba(40, 6, 4, .6); }
   #died.show { visibility: visible; }
-  #died div { text-align: center; font: 400 72px/1.1 var(--font); letter-spacing: .1em; color: var(--red); text-shadow: 4px 4px 0 #550000; }
+  #died div { text-align: center; font: 400 72px/1.1 var(--font); letter-spacing: .1em; color: var(--bad); text-shadow: 4px 4px 0 #2a0806; }
   #died.show div { animation: blink 0.8s steps(1) infinite; }
-  #died small { display: block; font: 16px/1.6 var(--font); letter-spacing: 0; color: var(--white); text-shadow: 2px 2px 0 #000; margin-top: 12px; animation: none; }
-  @keyframes blink { 50% { color: #aa0000; } }
+  #died small { display: block; font: 16px/1.6 var(--font); letter-spacing: 0; color: var(--text); text-shadow: 2px 2px 0 #000; margin-top: 12px; animation: none; }
+  @keyframes blink { 50% { color: #7a2620; } }
 
   aside { display: grid; gap: 12px; }
-  .bar { height: 14px; --c: var(--green); background: repeating-linear-gradient(90deg, #222233 0 7px, transparent 7px 9px); margin: 4px 0 8px; }
+  .bar { height: 14px; --c: var(--ok); background: repeating-linear-gradient(90deg, var(--track) 0 7px, transparent 7px 9px); margin: 4px 0 8px; }
   .bar i { display: block; height: 100%; width: 100%; background: repeating-linear-gradient(90deg, var(--c) 0 7px, transparent 7px 9px); }
   .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0 10px; }
-  .cell { display: flex; flex-direction: column-reverse; padding: 2px 0; border-top: 1px dotted var(--dgray); }
-  .cell .v { color: var(--yellow); font-size: 20px; line-height: 1.2; }
-  .cell .k { color: var(--gray); font-size: 14px; }
+  .cell { display: flex; flex-direction: column-reverse; padding: 2px 0; border-top: 1px dotted var(--faint); }
+  .cell .v { color: var(--accent); font-size: 20px; line-height: 1.2; }
+  .cell .k { color: var(--dim); font-size: 14px; }
 
-  #state { color: var(--green); min-height: 46px; margin-bottom: 6px; }
-  #state::before { content: "A>"; color: var(--gray); margin-right: 6px; }
+  #state { color: #b9ad8a; min-height: 46px; margin-bottom: 6px; }
+  #state::before { content: "A>"; color: var(--dim); margin-right: 6px; }
   .act { display: grid; grid-template-columns: 16px 58px 1fr 44px; gap: 6px; align-items: center; padding: 1px 2px; }
-  .act .mark { color: var(--yellow); }
-  .act .name { color: var(--cyan); }
-  .act .track { height: 12px; background: repeating-linear-gradient(90deg, #222233 0 5px, transparent 5px 7px); }
-  .act .fill { height: 100%; background: repeating-linear-gradient(90deg, var(--gray) 0 5px, transparent 5px 7px); }
-  .act .pct { text-align: right; color: var(--gray); }
-  .act.done { background: var(--navy); }
-  .act.done .name, .act.done .pct { color: var(--yellow); }
-  .act.done .fill { background: repeating-linear-gradient(90deg, var(--yellow) 0 5px, transparent 5px 7px); }
+  .act .mark { color: var(--accent); }
+  .act .name { color: var(--frame-hi); }
+  .act .track { height: 12px; background: repeating-linear-gradient(90deg, var(--track) 0 5px, transparent 5px 7px); }
+  .act .fill { height: 100%; background: repeating-linear-gradient(90deg, var(--dim) 0 5px, transparent 5px 7px); }
+  .act .pct { text-align: right; color: var(--dim); }
+  .act.done { background: var(--sel); }
+  .act.done .name, .act.done .pct { color: var(--accent); }
+  .act.done .fill { background: repeating-linear-gradient(90deg, var(--accent) 0 5px, transparent 5px 7px); }
   #acts { min-height: 132px; }
   table { width: 100%; border-collapse: collapse; }
-  th { font-weight: 400; color: var(--gray); font-size: 14px; text-align: right; border-bottom: 1px dotted var(--dgray); }
-  td { text-align: right; color: var(--yellow); }
-  th:first-child, td:first-child { text-align: left; color: var(--cyan); }
-  tr.now td:first-child::before { content: "▶"; color: var(--yellow); }
-  tr.now { background: var(--navy); }
-  #log { color: var(--gray); height: 136px; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
+  th { font-weight: 400; color: var(--dim); font-size: 14px; text-align: right; border-bottom: 1px dotted var(--faint); }
+  td { text-align: right; color: var(--accent); }
+  th:first-child, td:first-child { text-align: left; color: var(--frame-hi); }
+  tr.now td:first-child::before { content: "▶"; color: var(--accent); }
+  tr.now { background: var(--sel); }
+  #log { color: var(--dim); height: 136px; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
   #log div::before { content: "・"; }
-  #log div:last-child { color: var(--white); }
+  #log div:last-child { color: var(--text); }
 
   /* 画面下のファンクションキーバー */
-  footer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--black); border-top: 2px solid var(--cyan); }
-  footer button { font: 16px/1.2 var(--font); background: var(--black); color: var(--white); border: 0; padding: 2px 10px 2px 0; cursor: pointer; }
-  footer button kbd { font: inherit; background: var(--cyan); color: var(--black); padding: 1px 6px; margin-right: 8px; text-shadow: none; }
-  footer button:hover { color: var(--cyan); }
-  footer button.on { color: var(--yellow); }
-  footer button.on kbd { background: var(--yellow); }
+  footer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--panel); border-top: 2px solid var(--frame); }
+  footer button { font: 16px/1.2 var(--font); background: var(--panel); color: var(--text); border: 0; padding: 2px 10px 2px 0; cursor: pointer; }
+  footer button kbd { font: inherit; background: var(--frame); color: #140f08; padding: 1px 6px; margin-right: 8px; text-shadow: none; }
+  footer button:hover { color: var(--frame-hi); }
+  footer button.on { color: var(--accent); }
+  footer button.on kbd { background: var(--accent); }
   footer .spacer { flex: 1; }
   footer { flex-wrap: wrap; }
-  footer .gens, footer .orders { display: flex; align-items: center; gap: 4px; color: var(--cyan); margin-left: 12px; }
-  footer .gens button { padding: 2px 8px; border: 1px solid var(--dgray); }
-  footer .gens button.on { border-color: var(--yellow); }
-  footer .orders button { padding: 2px 10px 2px 0; border: 1px solid var(--dgray); }
-  footer .orders button.on { border-color: var(--yellow); background: var(--navy); }
-  #order { color: var(--yellow); font-size: 20px; margin-bottom: 4px; }
-  #order::before { content: "命令:"; color: var(--gray); font-size: 16px; margin-right: 8px; }
-  footer label { display: flex; align-items: center; gap: 8px; color: var(--cyan); }
-  footer label b { font-weight: 400; color: var(--yellow); min-width: 84px; }
-  input[type=range] { -webkit-appearance: none; appearance: none; width: 180px; height: 14px; background: repeating-linear-gradient(90deg, var(--dgray) 0 4px, transparent 4px 8px); outline: none; }
-  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 20px; background: var(--yellow); cursor: pointer; }
-  input[type=range]::-moz-range-thumb { width: 12px; height: 20px; background: var(--yellow); border: 0; cursor: pointer; }
+  footer .gens, footer .orders { display: flex; align-items: center; gap: 4px; color: var(--frame-hi); margin-left: 12px; }
+  footer .gens button { padding: 2px 8px; border: 1px solid var(--faint); }
+  footer .gens button.on { border-color: var(--accent); }
+  footer .orders button { padding: 2px 10px 2px 0; border: 1px solid var(--faint); }
+  footer .orders button.on { border-color: var(--accent); background: var(--sel); }
+  #order { color: var(--accent); font-size: 20px; margin-bottom: 4px; }
+  #order::before { content: "命令:"; color: var(--dim); font-size: 16px; margin-right: 8px; }
+  footer label { display: flex; align-items: center; gap: 8px; color: var(--frame-hi); }
+  footer label b { font-weight: 400; color: var(--accent); min-width: 84px; }
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 180px; height: 14px; background: repeating-linear-gradient(90deg, var(--faint) 0 4px, transparent 4px 8px); outline: none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 20px; background: var(--accent); cursor: pointer; }
+  input[type=range]::-moz-range-thumb { width: 12px; height: 20px; background: var(--accent); border: 0; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -163,7 +164,7 @@ const ORDER_JP = { cautious: "慎重に", aggressive: "攻めろ", loot: "漁れ
 const scoreOf = h => h.depth * 100 + h.kills * 10 + h.gold;
 let order = null, hiscore = 0;
 try { hiscore = +localStorage.getItem("laya-rogue-hiscore") || 0; } catch {}
-const GLYPH = { rat: ["r", "#c8843c"], goblin: ["g", "#55ff55"], ogre: ["O", "#ff5555"], potion: ["!", "#ff55ff"], gold: ["$", "#ffff55"] };
+const GLYPH = { rat: ["r", "#b08a5e"], goblin: ["g", "#93b060"], ogre: ["O", "#c85a44"], potion: ["!", "#b184c4"], gold: ["$", "#e2c25c"] };
 const FONT = '"DotGothic16", "MS Gothic", monospace';
 
 let GW = 48, GH = 26, T = 20;
@@ -210,7 +211,7 @@ function setOrder(name, shout) {
   order = name;
   for (const b of $("orders").children) b.classList.toggle("on", b.dataset.order === name);
   $("order").textContent = ORDER_JP[name] ?? name;
-  if (shout && hero) floats.push({ x: hero.x, y: hero.y - 1, text: `「${ORDER_JP[name]}！」`, c: "#ffff55", life: 1.1, vy: -0.9 });
+  if (shout && hero) floats.push({ x: hero.x, y: hero.y - 1, text: `「${ORDER_JP[name]}！」`, c: "#ecd07a", life: 1.1, vy: -0.9 });
 }
 function setupGenerations(list, current) {
   $("gens").innerHTML = "";
@@ -259,13 +260,13 @@ function onFrame(m) {
   lit = new Set(m.visible.map(([x, y]) => y * GW + x));
   items = m.items;
 
-  if (hero && m.hero.hp < hero.hp) { floats.push({ x: m.hero.x, y: m.hero.y, text: "-" + (hero.hp - m.hero.hp), c: "#ff5555", life: 0.7 }); flash = 1; }
-  if (hero && m.hero.hp > hero.hp + 2) floats.push({ x: m.hero.x, y: m.hero.y, text: "+" + (m.hero.hp - hero.hp), c: "#55ff55", life: 0.8 });
+  if (hero && m.hero.hp < hero.hp) { floats.push({ x: m.hero.x, y: m.hero.y, text: "-" + (hero.hp - m.hero.hp), c: "#d8563f", life: 0.7 }); flash = 1; }
+  if (hero && m.hero.hp > hero.hp + 2) floats.push({ x: m.hero.x, y: m.hero.y, text: "+" + (m.hero.hp - hero.hp), c: "#8fbf6a", life: 0.8 });
   const seenIds = new Set();
   for (const mo of m.monsters) {
     seenIds.add(mo.id);
     const old = monsters.get(mo.id);
-    if (old && mo.hp < old.hp) floats.push({ x: mo.x, y: mo.y, text: "-" + (old.hp - mo.hp), c: "#ffff55", life: 0.6 });
+    if (old && mo.hp < old.hp) floats.push({ x: mo.x, y: mo.y, text: "-" + (old.hp - mo.hp), c: "#ecd07a", life: 0.6 });
     monsters.set(mo.id, { ...mo, dx: old ? old.dx : mo.x, dy: old ? old.dy : mo.y });
   }
   for (const [id, old] of monsters) if (!seenIds.has(id)) {
@@ -292,7 +293,7 @@ setInterval(() => {                       // パネルは 10Hz。毎フレーム
   const m = pendingPanel; if (!m) return; pendingPanel = null;
   const h = m.hero, f = h.hp / h.max_hp;
   $("depth").textContent = `B${h.depth}F`;
-  $("hp").style.width = f * 100 + "%"; $("hpbar").style.setProperty("--c", f <= .25 ? "var(--red)" : f <= .5 ? "var(--yellow)" : "var(--green)");
+  $("hp").style.width = f * 100 + "%"; $("hpbar").style.setProperty("--c", f <= .25 ? "var(--bad)" : f <= .5 ? "var(--warn)" : "var(--ok)");
   $("hpv").textContent = `${h.hp}/${h.max_hp}`; $("lv").textContent = h.level; $("pot").textContent = h.potions;
   $("gold").textContent = h.gold; $("kills").textContent = h.kills; $("turn").textContent = m.turn;
   const sc = scoreOf(h);
@@ -343,19 +344,19 @@ function draw(now) {
         g.fillRect(x * T, y * T + T - 2, T, 2); g.fillRect(x * T, y * T + (T >> 1) - 1, T, 2);
         g.fillRect(x * T + (T >> 1), y * T, 2, T >> 1); g.fillRect(x * T, y * T + (T >> 1), 2, T >> 1);
       } else if (isLit) { g.fillStyle = `rgba(255,220,170,${.12 * b})`; g.fillRect(x * T + (T >> 1) - 1, y * T + (T >> 1) - 1, 2, 2); }
-      if (t === 2) glyph(">", x, y, isLit ? "#55ffff" : "#1f5a66", isLit);
+      if (t === 2) glyph(">", x, y, isLit ? "#8fc0c4" : "#2f4a4c", isLit);
     }
     for (const it of items) glyph(GLYPH[it.kind][0], it.x, it.y, GLYPH[it.kind][1], true);
     for (const mo of monsters.values()) {
       mo.dx += (mo.x - mo.dx) * k; mo.dy += (mo.y - mo.dy) * k;
       glyph(GLYPH[mo.kind][0], mo.dx, mo.dy, GLYPH[mo.kind][1], true);
-      if (mo.hp < mo.max_hp) { g.fillStyle = "#400"; g.fillRect(mo.dx * T + 2, mo.dy * T - 3, T - 4, 3); g.fillStyle = "#ff5555"; g.fillRect(mo.dx * T + 2, mo.dy * T - 3, (T - 4) * mo.hp / mo.max_hp, 3); }
+      if (mo.hp < mo.max_hp) { g.fillStyle = "#2a0d0a"; g.fillRect(mo.dx * T + 2, mo.dy * T - 3, T - 4, 3); g.fillStyle = "#b8433a"; g.fillRect(mo.dx * T + 2, mo.dy * T - 3, (T - 4) * mo.hp / mo.max_hp, 3); }
     }
     const hx = heroDraw.x * T + T / 2, hy = heroDraw.y * T + T / 2;
     const glow = g.createRadialGradient(hx, hy, 0, hx, hy, T * 5);
     glow.addColorStop(0, "rgba(255,180,80,.20)"); glow.addColorStop(1, "rgba(255,180,80,0)");
     g.fillStyle = glow; g.fillRect(hx - T * 5, hy - T * 5, T * 10, T * 10);
-    glyph("@", heroDraw.x, heroDraw.y, flash > 0 ? "#ff5555" : "#ffff55", true, true);
+    glyph("@", heroDraw.x, heroDraw.y, flash > 0 ? "#d8563f" : "#f2dc96", true, true);
     flash = Math.max(0, flash - dt * 5);
   }
   for (let i = floats.length - 1; i >= 0; i--) {
