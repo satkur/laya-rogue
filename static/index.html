@@ -95,6 +95,14 @@
   footer .orders button.on { border-color: var(--accent); background: var(--sel); }
   #order { color: var(--accent); font-size: 20px; margin-bottom: 4px; }
   #order::before { content: "命令:"; color: var(--dim); font-size: 16px; margin-right: 8px; }
+  #adviser { margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px dotted var(--faint); }
+  #adviser.off { display: none; }
+  #plan { color: var(--accent); font-size: 18px; }
+  #plan::before { content: "方針:"; color: var(--dim); font-size: 16px; margin-right: 8px; }
+  #reason { color: var(--dim); font-size: 14px; min-height: 1.3em; }
+  #adviser.thinking #reason { color: var(--warn); }
+  footer .adviser button { padding: 2px 8px; border: 1px solid var(--faint); margin-left: 12px; }
+  footer .adviser button.on { border-color: var(--accent); background: var(--sel); }
   footer label { display: flex; align-items: center; gap: 8px; color: var(--frame-hi); }
   footer label b { font-weight: 400; color: var(--accent); min-width: 84px; }
   input[type=range] { -webkit-appearance: none; appearance: none; width: 180px; height: 14px; background: repeating-linear-gradient(90deg, var(--faint) 0 4px, transparent 4px 8px); outline: none; }
@@ -136,6 +144,7 @@
     <fieldset>
       <legend>LAYA の判断<em id="ms">– ms</em></legend>
       <div id="order">–</div>
+      <div id="adviser" class="off"><div id="plan">–</div><div id="reason"></div></div>
       <div id="state"></div>
       <div id="acts"></div>
       <div class="grid">
@@ -158,6 +167,7 @@
   <button id="restart"><kbd>R</kbd>最初から</button>
   <div class="orders">命令 <span id="orders"></span></div>
   <div class="gens">世代 <span id="gens"></span></div>
+  <div class="adviser"><button id="adviserBtn"><kbd>L</kbd><span>方針役</span></button></div>
   <div class="spacer"></div>
   <label>SPEED <input type="range" id="speed" min="0" max="100" value="58"> <b id="speedv"></b></label>
 </footer>
@@ -191,7 +201,10 @@ const send = o => ws.readyState === 1 && ws.send(JSON.stringify(o));
 ws.onclose = () => { $("device").textContent = "切断されました（server.py を再起動してください）"; };
 ws.onmessage = ev => {
   const m = JSON.parse(ev.data);
-  if (m.type === "hello") { GW = m.w; GH = m.h; $("device").textContent = ""; resize(); pushConfig(); setupGenerations(m.generations, m.generation); setupOrders(m.orders, m.order); }
+  if (m.type === "hello") { GW = m.w; GH = m.h; $("device").textContent = ""; resize(); pushConfig(); setupGenerations(m.generations, m.generation); setupOrders(m.orders, m.order); setAdviser(m.adviser); }
+  else if (m.type === "adviser") setAdviser(m.adviser);
+  else if (m.type === "thinking") { $("adviser").classList.add("thinking"); $("reason").textContent = `方針役が考え中… (${TRIGGER_JP[m.kind] ?? m.kind})`; }
+  else if (m.type === "advice") onAdvice(m);
   else if (m.type === "order") setOrder(m.order, true);
   else if (m.type === "generation") setGeneration(m.generation);
   else if (m.type === "floor") { tiles = Array.from({ length: GH }, () => new Array(GW).fill(-1)); monsters.clear(); hero = null; heroDraw = null; $("died").classList.remove("show"); }
@@ -210,6 +223,35 @@ ws.onmessage = ev => {
 
 // ---------------------------------------------------------------- controls
 let paused = false;
+const TRIGGER_JP = { floor: "階に到着", hp: "体力低下", hunger: "空腹", danger: "強敵", stuck: "足踏み", periodic: "見回り" };
+const PLAN_JP = { explore_fully: "この階を探索し切る", descend_asap: "階段を見つけ次第降りる", free: "おまかせ" };
+const TACTIC_JP = { fight: "戦え", flee: "逃げろ" };
+let adviser = null;
+function planText(a) {
+  return [PLAN_JP[a.plan] ?? a.plan, a.rest ? "傷は休んで治す" : null, TACTIC_JP[a.tactic] ? `敵には「${TACTIC_JP[a.tactic]}」` : null].filter(Boolean).join(" / ");
+}
+function setAdviser(a) {
+  adviser = a;
+  $("adviser").classList.toggle("off", !a.enabled);
+  $("adviserBtn").classList.toggle("on", a.enabled && !a.stopped);
+  $("adviserBtn").querySelector("span").textContent = `方針役 ${a.stopped ? "停止中" : a.enabled ? "ON" : "OFF"}` + (a.enabled ? ` (${a.model} ${a.calls}回)` : "");
+  $("plan").textContent = planText(a);
+  if (a.stopped) $("reason").textContent = `自動停止: ${a.stopped}（L で再開）`;
+}
+function onAdvice(m) {
+  $("adviser").classList.remove("thinking");
+  setAdviser(m.adviser);
+  const el = document.createElement("div");
+  if (m.error) { $("reason").textContent = `方針役の応答なし: ${m.error}`; el.textContent = "方針役の応答なし"; }
+  else {
+    $("reason").textContent = `${TRIGGER_JP[m.kind] ?? m.kind}: ${m.reason} (${m.sec}秒)`;
+    el.textContent = `方針役「${m.reason}」`;
+    if (hero) floats.push({ x: hero.x, y: hero.y - 1, text: `「${PLAN_JP[m.plan] ?? m.plan}」`, c: "#ecd07a", life: 1.4, vy: -0.7 });
+  }
+  el.style.color = "var(--accent)";
+  $("log").appendChild(el);
+  while ($("log").children.length > 6) $("log").firstChild.remove();
+}
 function setupOrders(list, current) {
   $("order").style.display = document.querySelector("footer .orders").style.display = list.length ? "" : "none";
   $("orders").innerHTML = "";
@@ -260,16 +302,19 @@ $("speed").oninput = pushConfig;
 $("pause").onclick = () => { paused = !paused; $("pause").classList.toggle("on", paused); $("pause").querySelector("span").textContent = paused ? "再開" : "一時停止"; pushConfig(); };
 $("step").onclick = () => { if (!paused) $("pause").onclick(); send({ type: "step" }); };
 $("restart").onclick = () => send({ type: "restart" });
+$("adviserBtn").onclick = () => send({ type: "adviser", enabled: !(adviser?.enabled && !adviser?.stopped) });
 addEventListener("keydown", e => {
   if (e.code === "Space") { e.preventDefault(); $("pause").onclick(); }
   else if (e.key === ".") $("step").onclick();
   else if (e.key === "r" || e.key === "R") $("restart").onclick();
+  else if (e.key === "l" || e.key === "L") $("adviserBtn").onclick();
   else if ("1234".includes(e.key)) $("orders").children[+e.key - 1]?.click();
 });
 
 // ---------------------------------------------------------------- frame
 let pendingPanel = null;
 function onFrame(m) {
+  if (m.adviser) setAdviser(m.adviser);
   for (const [x, y, t] of m.seen) tiles[y][x] = t;
   lit = new Set(m.visible.map(([x, y]) => y * GW + x));
   items = m.items;

@@ -2,6 +2,8 @@
 
     uv run server.py            # モデルを読み込み、ブラウザを開く
     uv run server.py --no-open
+    uv run server.py --no-llm   # 方針役の LLM (strategist.py、claude -p を呼ぶ) を切った状態で始める
+    uv run server.py --llm-model opus
 """
 import asyncio
 import sys
@@ -15,10 +17,15 @@ from fastapi.responses import FileResponse
 
 from brain import WEIGHTS, LayaBrain
 from game import H, W, Game
+import strategist as strategist_mod
+from strategist import Masked, Strategist
 
 HOST, PORT = "127.0.0.1", 8766
 STATIC = Path(__file__).parent / "static"
 brain = None
+LLM_MODEL = sys.argv[sys.argv.index("--llm-model") + 1] if "--llm-model" in sys.argv else "sonnet"
+adviser = Strategist(model=LLM_MODEL, enabled="--no-llm" not in sys.argv)
+strategist_mod.MAX_CALLS_TOTAL = 300  # 画面を開きっぱなしにしても、ここで方針役は自動で止まる (画面で入れ直すと再開)
 
 
 def generations():
@@ -51,6 +58,11 @@ async def index():
     return FileResponse(STATIC / "index.html")
 
 
+def adviser_state():
+    return {"enabled": adviser.enabled, "model": adviser.model, "stopped": adviser.stopped, "calls": adviser.calls,
+            "plan": adviser.plan, "rest": adviser.rest, "tactic": adviser.tactic}
+
+
 def frame(g, d, log_from):
     return {
         "type": "frame",
@@ -65,6 +77,7 @@ def frame(g, d, log_from):
         "seen": g.newly_seen,
         "visible": [list(p) for p in g.visible],
         "decision": d,
+        "adviser": adviser_state(),
         "log": g.log[log_from:],
     }
 
@@ -74,18 +87,26 @@ async def ws(sock: WebSocket):
     await sock.accept()
     cfg = {"delay": 0.147, "paused": False, "step": False, "restart": False}
     await sock.send_json({"type": "hello", "w": W, "h": H, "generations": generations(), "generation": brain.generation,
-                          "orders": [], "order": None})  # 命令はいったん外してある
+                          "orders": [], "order": None,  # 命令はいったん外してある
+                          "adviser": adviser_state()})
 
     async def play():
         while True:
             g = Game()
+            adviser.reset()
             gen = brain.generation
             depth, log_from = 0, 0
             while not g.over and not cfg["restart"]:
                 while cfg["paused"] and not cfg["step"] and not cfg["restart"]:
                     await asyncio.sleep(0.03)
                 cfg["step"] = False
-                d = brain.decide(g)  # 10〜30ms。ローカル単独利用なのでイベントループ上で直接呼ぶ
+                trigger = adviser.check(g)
+                if trigger:  # 方針役は数秒かかる。そのあいだゲームは止めて待つ
+                    await sock.send_json({"type": "thinking", "kind": adviser.kind})
+                    advice = await asyncio.to_thread(adviser.consult, g, trigger)
+                    await sock.send_json({"type": "advice", **advice, "adviser": adviser_state()})
+                d = brain.decide(Masked(g, adviser.allowed(g, g.valid_actions())))  # 10〜30ms。ローカル単独利用なのでイベントループ上で直接呼ぶ
+                adviser.recent = (adviser.recent + [d["action"]])[-40:]
                 g.step(d["action"])
                 if g.depth != depth:
                     depth = g.depth
@@ -111,6 +132,11 @@ async def ws(sock: WebSocket):
                 cfg["step"] = True
             elif m["type"] == "restart":
                 cfg["restart"] = True
+            elif m["type"] == "adviser":  # 方針役の ON/OFF。入れ直すと自動停止も解除する
+                adviser.enabled = bool(m.get("enabled"))
+                if adviser.enabled:
+                    adviser.stopped, adviser.errors, strategist_mod.total_calls = None, 0, 0
+                await sock.send_json({"type": "adviser", "adviser": adviser_state()})
             elif m["type"] == "generation":  # 世代を替えたら、その頭脳で最初から潜り直す
                 gen = m.get("name")
                 if gen is None or gen in generations():
