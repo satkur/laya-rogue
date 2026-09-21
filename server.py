@@ -70,7 +70,7 @@ def frame(g, d, log_from):
 @app.websocket("/ws")
 async def ws(sock: WebSocket):
     await sock.accept()
-    cfg = {"delay": 0.12, "paused": False, "step": False, "restart": False}
+    cfg = {"delay": 0.147, "paused": False, "step": False, "restart": False}
     await sock.send_json({"type": "hello", "w": W, "h": H, "generations": generations(), "generation": brain.generation})
 
     async def play():
