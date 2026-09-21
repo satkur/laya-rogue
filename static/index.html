@@ -211,6 +211,7 @@ ws.onmessage = ev => {
 // ---------------------------------------------------------------- controls
 let paused = false;
 function setupOrders(list, current) {
+  $("order").style.display = document.querySelector("footer .orders").style.display = list.length ? "" : "none";
   $("orders").innerHTML = "";
   list.forEach((name, i) => {
     const b = document.createElement("button");

@@ -3,9 +3,8 @@
     uv run sim.py [回数] [最大ターン] [頭脳...]
 
 頭脳: random / rules / diver / table:<ラウンド> / laya (未学習) / laya:<世代名>
-      +<命令> で命令を固定 (cautious / aggressive / loot / descend、既定は aggressive)
       @<鋭さ> で行動の引き方を変える (@max で常に最有力、既定は 2.5)
-例:   uv run sim.py 40 8000 random rules table:12+descend laya laya:gen12+cautious
+例:   uv run sim.py 40 8000 random rules table:12 laya laya:gen12@max
 """
 import json
 import random
@@ -16,7 +15,7 @@ from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-from brain import DEFAULT_ORDER, DiverBrain, RandomBrain, RuleBrain, TableBrain
+from brain import DiverBrain, RandomBrain, RuleBrain, TableBrain
 from game import Game
 
 DATA = Path(__file__).parent / "data"
@@ -24,12 +23,11 @@ DATA = Path(__file__).parent / "data"
 
 def split_spec(spec):
     spec, _, sh = spec.partition("@")
-    spec, _, order = spec.partition("+")
-    return spec, order or DEFAULT_ORDER, (2.5 if not sh else None if sh == "max" else float(sh))
+    return spec, (2.5 if not sh else None if sh == "max" else float(sh))
 
 
 def make_cpu_brain(spec):
-    spec, order, sharpness = split_spec(spec)
+    spec, sharpness = split_spec(spec)
     if spec == "random":
         return RandomBrain(random.Random(0))
     if spec == "rules":
@@ -37,9 +35,7 @@ def make_cpu_brain(spec):
     if spec == "diver":
         return DiverBrain()
     if spec.startswith("table:"):
-        brain = TableBrain(json.loads((DATA / f"table_r{spec[6:]}.json").read_text(encoding="utf-8")), sharpness)
-        brain.order = order
-        return brain
+        return TableBrain(json.loads((DATA / f"table_r{spec[6:]}.json").read_text(encoding="utf-8")), sharpness)
     raise ValueError(spec)
 
 
@@ -87,13 +83,13 @@ def main():
         if spec.startswith("laya"):
             from brain import LayaBrain
 
-            name, order, sharpness = split_spec(spec)
+            name, sharpness = split_spec(spec)
             gen = name[5:] or None
             if laya is None:
                 laya = LayaBrain(gen)
             else:
                 laya.load_generation(gen)
-            laya.order, laya.sharpness = order, sharpness
+            laya.sharpness = sharpness
             results = [play(laya, s, max_turns) for s in seeds]
         else:
             with ProcessPoolExecutor() as pool:

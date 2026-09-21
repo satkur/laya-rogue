@@ -5,8 +5,8 @@
   - いま実行できる行動を列挙し、それぞれが何をするかを中立に説明する (ACTION_DESC)
 どの行動が良いかは一切教えない。安全装置もない。選ぶのは Laya。
 
-人間は方針役。状況文の先頭に命令 (ORDERS) が入り、Laya は同じ状況でも命令によって行動を変える。
-命令ごとに「何が嬉しいか」を変えて自己対戦させてあるので (learn.py)、命令の意味は Laya が経験から覚えたもの。
+人間が命令 (慎重に / 攻めろ / 漁れ / 降りろ) を出す仕組みは、効きが弱かったのでいったん外してある (NOTES.md 4〜6 章)。
+腕前が上がってから戻す。
 
 素の Laya はこの形式だとランダム以下なので (NOTES.md)、learn.py の自己対戦で得た経験を
 判断ヘッドに学習させた重み (weights/*.pt) を載せて使う。
@@ -17,9 +17,7 @@ import time
 from pathlib import Path
 
 WEIGHTS = Path(__file__).parent / "weights"
-INSTRUCTIONS = "You are the hero of a dungeon crawl. Follow the order and choose the next action."
-ORDERS = ["cautious", "aggressive", "loot", "descend"]
-DEFAULT_ORDER = "aggressive"
+INSTRUCTIONS = "You are the hero of a dungeon crawl. Choose the next action."
 ACTION_DESC = {
     "attack": "Hit the adjacent enemy.",
     "approach": "Move toward the nearest enemy.",
@@ -61,11 +59,21 @@ def depth_word(d):
     return "shallow" if d <= 4 else "middle" if d <= 9 else "deep" if d <= 14 else "abyss"
 
 
-def describe(g, valid, order):
-    """状況文。数値を避けて語彙を絞ってあるので、同じ状況は同じ文になる (= 経験表のキーになる)。"""
+# 殴り合いの見積もり (threat_word) に出てこない厄介さ。経験表のキーに入れて、種別ごとに対処を学べるようにする
+SPECIAL = {"L": "steal", "N": "steal",                                # 金貨・持ち物を盗んで消える
+           "A": "weaken", "R": "weaken", "W": "weaken", "V": "weaken",  # 鎧の錆び・毒・レベル吸収・最大 HP 吸収
+           "F": "disable", "I": "disable", "M": "disable"}            # 拘束・凍結・混乱
+
+
+def special_word(m):
+    return SPECIAL.get(m["ch"], "plain")
+
+
+def describe(g, valid):
+    """状況文。数値を避けて語彙を絞ってある。"""
     mons = g.visible_monsters()
     items = g.visible_items()
-    parts = [f"Order: {order}.", f"Depth: {depth_word(g.depth)}.", f"HP {hp_word(g)}.", f"Hunger: {g.hunger_word()}.",
+    parts = [f"Depth: {depth_word(g.depth)}.", f"HP {hp_word(g)}.", f"Hunger: {g.hunger_word()}.",
              f"Food: {count_word(g.food)}.", f"Healing potions: {count_word(g.has_heal())}."]
     status = [w for w, on in (("confused", g.confused), ("held", g.held_by is not None), ("weakened", g.str < g.max_str)) if on]
     if status:
@@ -82,28 +90,28 @@ def describe(g, valid, order):
     return " ".join(parts)
 
 
-def coarse_key(g, valid, order):
+def coarse_key(g, valid):
     """経験表のキー。状況文 (describe) よりずっと粗い。
 
     状況文をそのままキーにすると 2 万種類以上に割れ、肝心の戦闘の状況でも経験が 3〜5 件しか溜まらず、
     死亡の減点の振れ幅に埋もれて評価がでたらめになった。表は「勝てそうな敵が隣にいる、体力は低い」くらいの
-    粗さで経験を集め、Laya には詳しい状況文を読ませて同じ評価を教える。敵の名前や深さで判断を変えるところまでは、
-    この表からは学べない (第 1 段階の割り切り)。
+    粗さで経験を集め、Laya には詳しい状況文を読ませて同じ評価を教える。敵は名前ではなく
+    「殴り合いの強さ × 特殊攻撃の種別 (盗む / 弱らせる / 動きを封じる / なし)」まで。深さで判断を変えるところは、この表からは学べない。
     """
     awake = [m for m in g.visible_monsters() if m["awake"]]
     asleep = [m for m in g.visible_monsters() if not m["awake"]]
     if awake:
         rank = {"weak": 0, "even": 1, "deadly": 2}
         worst = max(awake, key=lambda m: (rank[threat_word(g, m)], -g.dist(m["x"], m["y"])))
-        enemy = f"{threat_word(g, worst)}-{dist_word(g.dist(worst['x'], worst['y']))}" + ("+" if len(awake) > 1 else "")
+        enemy = f"{threat_word(g, worst)}-{special_word(worst)}-{dist_word(g.dist(worst['x'], worst['y']))}" + ("+" if len(awake) > 1 else "")
     elif asleep:
         nearest = asleep[0]
-        enemy = f"asleep-{threat_word(g, nearest)}-{dist_word(g.dist(nearest['x'], nearest['y']))}"
+        enemy = f"asleep-{threat_word(g, nearest)}-{special_word(nearest)}-{dist_word(g.dist(nearest['x'], nearest['y']))}"
     else:
         enemy = "none"
     hunger = g.hunger_word()
     flags = "".join(c for c, on in (("H", g.held_by is not None), ("C", g.confused)) if on)
-    return "|".join([order, hp_word(g), "starving" if hunger in ("weak", "fainting") else hunger, enemy, flags, ",".join(valid)])
+    return "|".join([hp_word(g), "starving" if hunger in ("weak", "fainting") else hunger, enemy, flags, ",".join(valid)])
 
 
 def choose(probs, sharpness, rng):
@@ -124,7 +132,6 @@ class LayaBrain:
     def __init__(self, generation=None, model="multilingual", sharpness=2.5):
         from laya import Router
 
-        self.order = DEFAULT_ORDER
         self.sharpness = sharpness
         self.rng = random.Random(0)
         self.agent = Router().load(model)
@@ -145,7 +152,7 @@ class LayaBrain:
 
     def decide(self, g):
         valid = g.valid_actions()
-        state = describe(g, valid, self.order)
+        state = describe(g, valid)
         if len(valid) == 1:  # 選びようがないときは推論しない
             return {"action": valid[0], "probs": {valid[0]: 1.0}, "state": state, "ms": 0.0}
         q = {"action": {"type": "choice", "instructions": INSTRUCTIONS, "criteria": {a: ACTION_DESC[a] for a in valid}}}
@@ -162,14 +169,13 @@ class TableBrain:
 
     def __init__(self, table, sharpness=2.5, rng=None):
         self.table = table
-        self.order = DEFAULT_ORDER
         self.sharpness = sharpness
         self.rng = rng or random.Random(0)
 
     def decide(self, g):
         valid = g.valid_actions()
-        state = describe(g, valid, self.order)
-        q = self.table.get(coarse_key(g, valid, self.order), {}).get("q")
+        state = describe(g, valid)
+        q = self.table.get(coarse_key(g, valid), {}).get("q")
         if q is None:
             a, probs = self.rng.choice(valid), {x: 1 / len(valid) for x in valid}
         else:  # train.py が Laya に教えるのと同じ softmax(平均リターン) を確率として使う

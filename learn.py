@@ -5,11 +5,12 @@
 1 ラウンドの流れ:
   1. いまの経験表に従って (ときどき気まぐれに) ダンジョンを潜る
   2. 途中の局面で、取れる行動を 1 つずつ実際に試し、その先 HORIZON ターンを何通りか先読みする
-  3. 先読みの結果を得点 (score) の増減で測り、(状況文, 行動) ごとに平均して表に足す
+  3. 先読みの結果を得点 (score) の増減で測り、(状況, 行動) ごとに平均して表に足す
+  4. 先読みの終点では「その状況から先の見込み」(前のラウンドまでの表の評価) を割り引いて足す。
+     40 ターンでは見えない価値 (空腹に備える、休んで回復する、死ぬとその先を全部失う) が、ラウンドを重ねるごとに表に染みていく
 次のラウンドは賢くなった表で潜るので、より先の局面の経験が溜まっていく。
 
-人間が与えるのは WANTS の「命令ごとに何が嬉しいか」だけ。どの行動が良いかは一切与えない。
-潜っている途中で命令をランダムに切り替えるので、どの深さの局面もすべての命令のもとで経験される。
+人間が与えるのは WANTS の「何が嬉しいか」だけ。どの行動が良いかは一切与えない。
 
 深い階の経験を増やす工夫: 新しい階に着いたときの勇者の状態 (レベル・装備・持ち物) を控えておき、
 次のラウンドでは半分強のエピソードをその続きから始める。浅い階で死に続けても、到達済みの深さの練習ができる。
@@ -26,7 +27,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-from brain import ORDERS, coarse_key, describe
+from brain import coarse_key, describe
 from game import Game, avg_dice
 
 DATA = Path(__file__).parent / "data"
@@ -36,21 +37,17 @@ P_EVAL = 0.05       # 通過した局面のうち、先読みで調べる割合
 MAX_TURNS = 3000
 EPSILON = 0.15      # 表を無視して気まぐれに動く確率 (知らない局面に出会うため)
 DECAY = 0.5         # ラウンドをまたぐとき、古い経験の重みをこれだけ残す
-ORDER_SPAN = 80     # 学習中、このターン数ごとに命令を引き直す
+GAMMA = 0.85        # 先読みの終点から先の見込みを、どれだけ割り引いて足すか (0 で足さない)
+ROLL_TEMP = 0.5     # 先読みの中での行動の選び方 (softmax の温度)
 P_CONTINUE = 0.6    # 控えておいた「階に着いた時点の状態」から始めるエピソードの割合
 POOL_PER_DEPTH = 300
 
-# 命令ごとの「何が嬉しいか」
-WANTS = {
-    "cautious":   dict(depth=5,  level=3, kills=0.3, gold=0.01, hp=10, heal=3.0, food=3, fed=6, gear=1, explored=0.004, death=80),
-    "aggressive": dict(depth=8,  level=6, kills=1.0, gold=0.01, hp=4,  heal=1.5, food=2, fed=5, gear=1, explored=0.008, death=30),
-    "loot":       dict(depth=4,  level=3, kills=0.3, gold=0.06, hp=5,  heal=4.0, food=4, fed=6, gear=2, explored=0.020, death=40),
-    "descend":    dict(depth=25, level=2, kills=0.2, gold=0.01, hp=4,  heal=1.5, food=2, fed=5, gear=1, explored=0.006, death=40),
-}
+# 何が嬉しいか。命令ごとに分けていたが、効きが弱かったのでいったん 1 本にしてある (NOTES.md)
+WANTS = dict(depth=10, level=5, kills=0.5, gold=0.01, hp=5, heal=2.5, food=3, fed=6, gear=1.5, explored=0.006, death=50)
 
 
-def score(g, order):
-    w = WANTS[order]
+def score(g):
+    w = WANTS
     gear = (10 - g.armor["ac"]) + avg_dice(g.weapon["dice"]) + g.weapon["dplus"] + 0.5 * g.weapon["hplus"]
     return (w["depth"] * g.depth + w["level"] * g.level + w["kills"] * g.kills + w["gold"] * g.gold
             + w["hp"] * g.hp / g.max_hp + w["heal"] * g.has_heal() + w["food"] * min(g.food, 3)
@@ -71,25 +68,41 @@ def pick(table, key, valid, rng, temp, eps):
     return rng.choices(valid, weights)[0]
 
 
-def rollout(g, action, order, table, seed):
+def value(table, key, valid):
+    """その状況から先の見込み。表の評価を、先読みの中と同じ選び方で平均する。経験がほとんどない状況は None。"""
+    q = table.get(key, {}).get("q")
+    if q is None or min(v[1] for v in q.values()) < 1:
+        return None
+    vals = [q[a][0] for a in valid]
+    top = max(vals)
+    weights = [math.exp((v - top) / ROLL_TEMP) for v in vals]
+    return sum(v * w for v, w in zip(vals, weights)) / sum(weights)
+
+
+def rollout(g, action, table, v_default, seed):
     rng = random.Random(seed)
     sim = g.clone(seed)
-    before = score(sim, order)
+    before = score(sim)
     sim.step(action)
     for _ in range(HORIZON - 1):
         if sim.over:
             break
         valid = sim.valid_actions()
-        sim.step(pick(table, coarse_key(sim, valid, order), valid, rng, 0.5, 0.05))
-    return score(sim, order) - before
+        sim.step(pick(table, coarse_key(sim, valid), valid, rng, ROLL_TEMP, 0.05))
+    ret = score(sim) - before
+    if GAMMA and not sim.over:  # 死んだらその先は 0。生きていれば、終点の状況の見込みを足す
+        valid = sim.valid_actions()
+        v = value(table, coarse_key(sim, valid), valid)
+        ret += GAMMA * (v_default if v is None else v)
+    return ret
 
 
-_table = {}
+_table, _v_default = {}, 0.0
 
 
-def _init(table):
-    global _table
-    _table = table
+def _init(table, v_default):
+    global _table, _v_default
+    _table, _v_default = table, v_default
 
 
 def episode(args):
@@ -98,18 +111,15 @@ def episode(args):
     rng = random.Random(seed)
     g = Game(rng.randrange(1 << 30), start)
     out, arrivals, depth = [], [], g.depth
-    order = rng.choice(ORDERS)
     turns = 0
     while not g.over and turns < MAX_TURNS:
-        if turns % ORDER_SPAN == 0:
-            order = rng.choice(ORDERS)
         turns += 1
         valid = g.valid_actions()
-        key = coarse_key(g, valid, order)
+        key = coarse_key(g, valid)
         if len(valid) > 1 and rng.random() < P_EVAL:
             # 行動どうしの比較では同じ乱数列を使う。「運の差」が消えて「行動の差」だけが残る
             seeds = [rng.random() for _ in range(ROLLOUTS)]
-            out.append((key, describe(g, valid, order), {a: sum(rollout(g, a, order, _table, s) for s in seeds) / ROLLOUTS for a in valid}))
+            out.append((key, describe(g, valid), {a: sum(rollout(g, a, _table, _v_default, s) for s in seeds) / ROLLOUTS for a in valid}))
         g.step(pick(_table, key, valid, rng, 1.0, EPSILON))
         g.log.clear()
         if g.depth != depth and not g.over:
@@ -141,11 +151,15 @@ def main():
         for entry in table.values():
             for v in entry["q"].values():
                 v[1] *= DECAY
+        # 表にない (経験がほとんどない) 状況の見込みは、表全体の平均で代用する。0 にすると未知の状況を不当に避けてしまう
+        known = [(value(table, k, list(e["q"])), min(v[1] for v in e["q"].values())) for k, e in table.items()]
+        known = [(v, w) for v, w in known if v is not None]
+        v_default = sum(v * w for v, w in known) / sum(w for _, w in known) if known else 0.0
         jobs = []
         for i in range(episodes):
             start = rng.choice(pool[rng.choice(list(pool))]) if pool and rng.random() < P_CONTINUE else None
             jobs.append((r * 1_000_003 + i, start))
-        with ProcessPoolExecutor(max_workers=max(1, (os.cpu_count() or 4) - 2), initializer=_init, initargs=(table,)) as pool_exec:
+        with ProcessPoolExecutor(max_workers=max(1, (os.cpu_count() or 4) - 2), initializer=_init, initargs=(table, v_default)) as pool_exec:
             results = list(pool_exec.map(episode, jobs, chunksize=2))
         n_eval, fresh_depths, deepest = 0, [], 0
         for samples, arrivals, depth, dead, fresh in results:
@@ -171,7 +185,7 @@ def main():
                     bucket[rng.randrange(POOL_PER_DEPTH)] = h
         (DATA / f"table_r{r}.json").write_text(json.dumps(table, ensure_ascii=False), encoding="utf-8")
         print(f"round {r}: 1 階から始めた回の平均到達階 {sum(fresh_depths) / max(1, len(fresh_depths)):.2f} | 全体の最深 {deepest} | "
-              f"控えのある深さ {max(pool) if pool else 1} | 調べた局面 {n_eval} | 表の状況数 {len(table)} | {time.perf_counter() - t0:.0f}s", flush=True)
+              f"控えのある深さ {max(pool) if pool else 1} | 調べた局面 {n_eval} | 表の状況数 {len(table)} | 見込みの平均 {v_default:.1f} | {time.perf_counter() - t0:.0f}s", flush=True)
 
 
 if __name__ == "__main__":
