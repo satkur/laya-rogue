@@ -1,18 +1,30 @@
-"""勇者の頭脳。laya-mlx の Snake デモと同じ「ラベル読み」方式。
+"""勇者の頭脳。
 
-正直な役割分担:
-  - コード (plan + appraise) が盤面を読み、各行動に "Best." / "Fine." / "Bad." の評価文を付ける
-  - Laya は評価文を読んで 1 つ選ぶ (1 回の順伝播、生成トークン 0)
-  - Laya が "Bad." の行動を選んだときだけ安全装置が介入し、"Bad." 以外で確率最大の行動に差し替える
+プログラムがやるのは 2 つだけ:
+  - 見えているものを言葉にする (describe)
+  - いま実行できる行動を列挙し、それぞれが何をするかを中立に説明する (ACTION_DESC)
+どの行動が良いかは一切教えない。安全装置もない。選ぶのは Laya。
 
-Laya に盤面を直接読ませる方式 (状況文 + 行動指針、順位を書かない評価文) も試したが、
-どちらもランダム行動と同等以下だった。Laya は初見のゲームの戦術を推論できるモデルではない。
+素の Laya はこの形式だとランダム以下なので (NOTES.md)、learn.py の自己対戦で得た経験を
+判断ヘッドに学習させた重み (weights/*.pt) を載せて使う。
 """
 import math
+import random
 import time
+from pathlib import Path
 
-INSTRUCTIONS = "Choose the best action for the hero right now."
-DANGER_Q = {"type": "noul", "instructions": "Is the hero in immediate danger of dying?"}
+WEIGHTS = Path(__file__).parent / "weights"
+INSTRUCTIONS = "You are the hero of a dungeon crawl. Choose the next action."
+ACTION_DESC = {
+    "attack": "Hit the adjacent enemy.",
+    "approach": "Move toward the nearest enemy.",
+    "flee": "Move away from the enemies.",
+    "drink_potion": "Drink a potion to restore HP.",
+    "pick_up": "Walk to the nearest item.",
+    "explore": "Walk toward unexplored area.",
+    "descend": "Walk to the stairs and go down.",
+    "rest": "Wait a turn to recover a little HP.",
+}
 
 
 def hp_word(g):
@@ -21,111 +33,107 @@ def hp_word(g):
 
 
 def threat_word(g, m):
+    """殴り合ったらどちらが先に倒れるかの見積もり。行動の推奨ではなく、敵の見た目の強さ。"""
     turns_to_kill = math.ceil(m["hp"] / g.hero_avg())
     turns_to_die = math.ceil(g.hp / g.monster_avg(m))
     r = turns_to_die / turns_to_kill
-    return "weak" if r >= 3 else "a fair fight" if r >= 1.5 else "deadly"
+    return "weak" if r >= 3 else "even" if r >= 1.5 else "deadly"
 
 
 def dist_word(d):
     return "adjacent" if d == 1 else "near" if d <= 3 else "far"
 
 
-def describe(g):
-    mons = g.visible_monsters()[:3]
-    parts = [f"Hero HP is {hp_word(g)} ({g.hp}/{g.max_hp}).", f"Potions: {g.potions}."]
-    parts.append("Enemies: " + "; ".join(f"{m['kind']} {dist_word(g.dist(m['x'], m['y']))}, {threat_word(g, m)}" for m in mons) + "." if mons else "No enemies in view.")
+def describe(g, valid):
+    """状況文。数値を避けて語彙を絞ってあるので、同じ状況は同じ文になる (= 経験表のキーになる)。"""
+    mons = g.visible_monsters()
+    items = g.visible_items()
+    parts = [f"HP {hp_word(g)}.", "Potions: " + ("none" if g.potions == 0 else "one" if g.potions == 1 else "several") + "."]
+    if mons:
+        seen = ", ".join(f"{m['kind']} {dist_word(g.dist(m['x'], m['y']))} ({threat_word(g, m)})" for m in mons[:3])
+        parts.append(f"Enemies: {seen}" + (f" and {len(mons) - 3} more." if len(mons) > 3 else "."))
+    else:
+        parts.append("Enemies: none.")
+    parts.append(f"Items: {items[0]['kind']} {dist_word(g.dist(items[0]['x'], items[0]['y']))}." if items else "Items: none.")
+    parts.append("Stairs: " + ("known." if "descend" in valid else "not found."))
+    parts.append("Unexplored area: " + ("yes." if "explore" in valid else "no."))
     return " ".join(parts)
 
 
-def appraise(g, valid):
-    """各行動について (評価文, 安全か) を返す。"""
-    mons = g.visible_monsters()
-    hp = hp_word(g)
-    hurt = hp in ("low", "critical")
-    deadly = any(threat_word(g, m) == "deadly" for m in mons)
-    out = {}
-    for a in valid:
-        if a == "attack":
-            out[a] = (("HP is critical. Fighting on is very dangerous.", False) if hp == "critical"
-                      else ("The adjacent enemy is deadly. A losing fight.", False) if deadly and hurt
-                      else ("Enemy adjacent and beatable. Strike now.", True))
-        elif a == "approach":
-            out[a] = (("HP is low. Charging in is reckless.", False) if hurt
-                      else ("The enemy is deadly. Charging in is reckless.", False) if deadly
-                      else ("Enemy in view and beatable. Engage it.", True))
-        elif a == "flee":
-            out[a] = ("Danger is real. Escaping is wise.", True) if hurt or deadly else ("No real danger. Running away is pointless.", True)
-        elif a == "drink_potion":
-            out[a] = (f"HP is {hp}. Healing is urgently needed.", True) if hurt else ("HP is only slightly down. Would waste the potion.", True)
-        elif a == "pick_up":
-            out[a] = ("Enemies are around. A risky distraction.", False) if mons else ("Item in view and no enemies. An easy reward.", True)
-        elif a == "explore":
-            out[a] = (("Enemies are around. Exploring now is careless.", False) if mons
-                      else ("HP is low. Exploring further is risky.", False) if hurt
-                      else ("All clear. A good time to explore.", True))
-        elif a == "descend":
-            out[a] = (("Enemies are around. A bad time for the stairs.", False) if mons
-                      else ("HP is low. Going deeper is risky.", False) if hurt
-                      else ("Floor not fully explored yet. Loot may remain.", True) if "explore" in valid
-                      else ("Floor cleared and HP is fine. Go deeper.", True))
-        elif a == "rest":
-            out[a] = (f"No enemies and HP is {hp}. Resting helps.", True) if hp in ("wounded", "low", "critical") else ("HP is nearly full. Resting wastes time.", True)
-    return out
+def state_key(text, valid):
+    return text + " | " + ",".join(valid)
 
 
-def plan(g, valid=None):
-    """盤面から最善手を決める (if 文の塊)。これがこのデモの本当のプレイヤー。"""
-    valid = valid or g.valid_actions()
-    mons = g.visible_monsters()
-    hp = hp_word(g)
-    hurt = hp in ("low", "critical")
-    deadly = any(threat_word(g, m) == "deadly" for m in mons)
-    if hurt and "drink_potion" in valid:
-        return "drink_potion"
-    if mons and (hurt or deadly) and hp != "full" and "attack" not in valid:
-        return "flee"
-    if "attack" in valid:
-        return "flee" if hp == "critical" else "attack"
-    if "approach" in valid:
-        return "approach"
-    if "rest" in valid and hp in ("wounded", "low", "critical"):
-        return "rest"
-    for a in ("pick_up", "explore", "descend"):
-        if a in valid:
-            return a
-    return valid[0]
+def choose(probs, sharpness, rng):
+    """確率に従って行動を引く。sharpness が大きいほど最有力の行動に寄り、None なら常に最有力。
+
+    常に最有力を選ぶと、評価が僅差の 2 状況を行き来する足踏みループから抜けられない
+    (「遠くの金貨へ向かう」↔「近くの金貨から離れて探索」など)。少しだけ揺らぐと抜けられる。
+    """
+    if sharpness is None:
+        return max(probs, key=probs.get)
+    acts = list(probs)
+    return rng.choices(acts, [probs[a] ** sharpness for a in acts])[0]
 
 
 class LayaBrain:
-    def __init__(self, model="multilingual", guarded=True):
+    """generation=None で素の Laya、名前を渡すと weights/<名前>.pt の学習済みヘッドを載せる。"""
+
+    def __init__(self, generation=None, model="multilingual", sharpness=2.5):
         from laya import Router
 
-        self.model = model
-        self.guarded = guarded
-        self.name = f"laya/{model}" + ("" if guarded else "/unguarded")
-        self.router = Router(preload=[model])
+        self.sharpness = sharpness
+        self.rng = random.Random(0)
+        self.agent = Router().load(model)
+        self.pristine = {k: v.clone() for k, v in self.agent.model.state_dict().items() if not k.startswith("encoder.")}
+        self.generation = None
+        self.name = "laya/untrained"
+        self.load_generation(generation)
+
+    def load_generation(self, generation):
+        import torch
+
+        state = self.pristine if generation is None else torch.load(WEIGHTS / f"{generation}.pt", map_location="cpu")
+        self.agent.model.load_state_dict(state, strict=False)
+        self.agent.temperature_by_options = {} if generation else self.agent.cfg.get("temperature_by_options", {})
+        self.agent.temperature = [1.0, 1.0, 1.0] if generation else self.agent.cfg.get("temperature", [1.0, 1.0, 1.0])
+        self.generation = generation
+        self.name = f"laya/{generation or 'untrained'}"
 
     def decide(self, g):
         valid = g.valid_actions()
-        best = plan(g, valid)
-        notes = appraise(g, valid)
-        criteria = {a: ("Best. " if a == best else "Fine. " if ok else "Bad. ") + text for a, (text, ok) in notes.items()}
-        state = describe(g)
-        questions = {"danger": DANGER_Q}
-        if len(valid) > 1:  # 選択肢が 1 つでは softmax にならないので危険度だけ聞く
-            questions["action"] = {"type": "choice", "instructions": INSTRUCTIONS, "criteria": criteria}
+        state = describe(g, valid)
+        if len(valid) == 1:  # 選びようがないときは推論しない
+            return {"action": valid[0], "probs": {valid[0]: 1.0}, "state": state, "ms": 0.0}
+        q = {"action": {"type": "choice", "instructions": INSTRUCTIONS, "criteria": {a: ACTION_DESC[a] for a in valid}}}
         t0 = time.perf_counter()
-        ans = self.router.predict(state, questions, model=self.model)["answers"]
+        probs = self.agent.predict(state, q)["answers"]["action"]["probabilities"]
         ms = (time.perf_counter() - t0) * 1000
-        probs = ans["action"]["probabilities"] if "action" in ans else {valid[0]: 1.0}
-        proposed = max(probs, key=probs.get)
-        executed = proposed
-        if self.guarded and not notes[proposed][1]:
-            safe = [a for a in valid if notes[a][1]]
-            executed = max(safe, key=probs.get) if safe else best
-        return {"action": executed, "proposed": proposed, "best": best, "intervened": executed != proposed,
-                "probs": probs, "criteria": criteria, "danger": ans["danger"]["noul"], "state": state, "ms": ms}
+        return {"action": choose(probs, self.sharpness, self.rng), "probs": probs, "state": state, "ms": ms}
+
+
+class TableBrain:
+    """自己対戦で作った経験表をそのまま引く頭脳。Laya がこの表をどこまで写し取れたかの物差し。"""
+
+    name = "table"
+
+    def __init__(self, table, sharpness=2.5, rng=None):
+        self.table = table
+        self.sharpness = sharpness
+        self.rng = rng or random.Random(0)
+
+    def decide(self, g):
+        valid = g.valid_actions()
+        state = describe(g, valid)
+        q = self.table.get(state_key(state, valid))
+        if q is None:
+            a, probs = self.rng.choice(valid), {x: 1 / len(valid) for x in valid}
+        else:  # train.py が Laya に教えるのと同じ softmax(平均リターン) を確率として使う
+            top = max(q[x][0] for x in valid)
+            z = {x: math.exp(q[x][0] - top) for x in valid}
+            probs = {x: v / sum(z.values()) for x, v in z.items()}
+            a = choose(probs, self.sharpness, self.rng)
+        return {"action": a, "probs": probs, "state": state, "ms": 0.0, "miss": q is None}
 
 
 class RandomBrain:
@@ -137,12 +145,30 @@ class RandomBrain:
     def decide(self, g):
         valid = g.valid_actions()
         a = self.rng.choice(valid)
-        return {"action": a, "proposed": a, "best": plan(g, valid), "intervened": False, "ms": 0.0}
+        return {"action": a, "probs": {a: 1.0}, "state": "", "ms": 0.0}
 
 
 class RuleBrain:
+    """人間が書いた if 文。学習には一切使わない、成績の物差し。"""
+
     name = "rules"
 
     def decide(self, g):
-        a = plan(g)
-        return {"action": a, "proposed": a, "best": a, "intervened": False, "ms": 0.0}
+        valid = g.valid_actions()
+        mons = g.visible_monsters()
+        hp = hp_word(g)
+        hurt = hp in ("low", "critical")
+        deadly = any(threat_word(g, m) == "deadly" for m in mons)
+        if hurt and "drink_potion" in valid:
+            a = "drink_potion"
+        elif mons and (hurt or deadly) and hp != "full" and "attack" not in valid:
+            a = "flee"
+        elif "attack" in valid:
+            a = "flee" if hp == "critical" else "attack"
+        elif "approach" in valid:
+            a = "approach"
+        elif "rest" in valid and hp in ("wounded", "low", "critical"):
+            a = "rest"
+        else:
+            a = next((x for x in ("pick_up", "explore", "descend") if x in valid), valid[0])
+        return {"action": a, "probs": {a: 1.0}, "state": "", "ms": 0.0}

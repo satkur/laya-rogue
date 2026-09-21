@@ -62,14 +62,16 @@
   .act .track { height: 12px; background: repeating-linear-gradient(90deg, #222233 0 5px, transparent 5px 7px); }
   .act .fill { height: 100%; background: repeating-linear-gradient(90deg, var(--gray) 0 5px, transparent 5px 7px); }
   .act .pct { text-align: right; color: var(--gray); }
-  .act .why { grid-column: 2 / -1; font-size: 14px; line-height: 1.25; color: var(--gray); margin-bottom: 3px; }
-  .act .why b { font-weight: 400; color: var(--green); } .act .why b.bad { color: var(--red); } .act .why b.fine { color: var(--white); }
   .act.done { background: var(--navy); }
   .act.done .name, .act.done .pct { color: var(--yellow); }
   .act.done .fill { background: repeating-linear-gradient(90deg, var(--yellow) 0 5px, transparent 5px 7px); }
-  .act.vetoed .name, .act.vetoed .pct, .act.vetoed .mark { color: var(--red); }
-  .act.vetoed .fill { background: repeating-linear-gradient(90deg, var(--red) 0 5px, transparent 5px 7px); }
-  #veto { color: var(--red); min-height: 22px; font-size: 14px; }
+  #acts { min-height: 132px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { font-weight: 400; color: var(--gray); font-size: 14px; text-align: right; border-bottom: 1px dotted var(--dgray); }
+  td { text-align: right; color: var(--yellow); }
+  th:first-child, td:first-child { text-align: left; color: var(--cyan); }
+  tr.now td:first-child::before { content: "▶"; color: var(--yellow); }
+  tr.now { background: var(--navy); }
   #log { color: var(--gray); height: 136px; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
   #log div::before { content: "・"; }
   #log div:last-child { color: var(--white); }
@@ -82,6 +84,9 @@
   footer button.on { color: var(--yellow); }
   footer button.on kbd { background: var(--yellow); }
   footer .spacer { flex: 1; }
+  footer .gens { display: flex; align-items: center; gap: 4px; color: var(--cyan); margin-left: 12px; }
+  footer .gens button { padding: 2px 8px; border: 1px solid var(--dgray); }
+  footer .gens button.on { border-color: var(--yellow); }
   footer label { display: flex; align-items: center; gap: 8px; color: var(--cyan); }
   footer label b { font-weight: 400; color: var(--yellow); min-width: 84px; }
   input[type=range] { -webkit-appearance: none; appearance: none; width: 180px; height: 14px; background: repeating-linear-gradient(90deg, var(--dgray) 0 4px, transparent 4px 8px); outline: none; }
@@ -113,20 +118,23 @@
         <div class="cell"><div class="v" id="kills">0</div><div class="k">撃破</div></div>
         <div class="cell"><div class="v" id="turn">0</div><div class="k">ターン</div></div>
         <div class="cell"><div class="v" id="best">1</div><div class="k">最深記録</div></div>
-        <div class="cell"><div class="v" id="runs">0</div><div class="k">死亡回数</div></div>
+        <div class="cell"><div class="v" id="runs">0</div><div class="k">挑戦回数</div></div>
       </div>
     </fieldset>
     <fieldset>
       <legend>LAYA の判断<em id="ms">– ms</em></legend>
       <div id="state"></div>
       <div id="acts"></div>
-      <div id="veto"></div>
       <div class="grid">
         <div class="cell"><div class="v" id="rate">0</div><div class="k">手/秒</div></div>
-        <div class="cell"><div class="v" id="agree">–</div><div class="k">Best選択</div></div>
-        <div class="cell"><div class="v" id="vetoRate">–</div><div class="k">介入</div></div>
+        <div class="cell"><div class="v" id="genNow">–</div><div class="k">学習世代</div></div>
+        <div class="cell"><div class="v">なし</div><div class="k">手の指示</div></div>
         <div class="cell"><div class="v">0</div><div class="k">生成token</div></div>
       </div>
+    </fieldset>
+    <fieldset>
+      <legend>世代別の成績</legend>
+      <table><thead><tr><th>世代</th><th>挑戦</th><th>平均到達</th><th>最深</th><th>平均撃破</th></tr></thead><tbody id="genStats"></tbody></table>
     </fieldset>
     <fieldset><legend>ログ</legend><div id="log"></div></fieldset>
   </aside>
@@ -134,8 +142,8 @@
 <footer>
   <button id="pause"><kbd>SPACE</kbd><span>一時停止</span></button>
   <button id="step"><kbd>.</kbd>1手進める</button>
-  <button id="guard" class="on" title="Laya が Bad. の行動を選んだら安全な行動に差し替える"><kbd>G</kbd><span>安全装置 ON</span></button>
   <button id="restart"><kbd>R</kbd>最初から</button>
+  <div class="gens">世代 <span id="gens"></span></div>
   <div class="spacer"></div>
   <label>SPEED <input type="range" id="speed" min="0" max="100" value="62"> <b id="speedv"></b></label>
 </footer>
@@ -149,7 +157,10 @@ const FONT = '"DotGothic16", "MS Gothic", monospace';
 
 let GW = 48, GH = 26, T = 20;
 let tiles = [], lit = new Set(), hero = null, heroDraw = null, monsters = new Map(), items = [], floats = [], danger = 0, shake = 0, flash = 0;
-const stats = { stamps: [], ms: [], n: 0, agree: 0, veto: 0, best: 1, runs: 0 };
+const stats = { stamps: [], ms: [], best: 1, runs: 0 };
+const genStats = new Map();   // 世代名 -> { runs, depth, best, kills }
+let generation = null;
+const genLabel = g => g ?? "未学習";
 
 // ---------------------------------------------------------------- websocket
 const ws = new WebSocket(`ws://${location.host}/ws`);
@@ -157,33 +168,58 @@ const send = o => ws.readyState === 1 && ws.send(JSON.stringify(o));
 ws.onclose = () => { $("device").textContent = "切断されました（server.py を再起動してください）"; };
 ws.onmessage = ev => {
   const m = JSON.parse(ev.data);
-  if (m.type === "hello") { GW = m.w; GH = m.h; $("device").textContent = ""; resize(); pushConfig(); }
+  if (m.type === "hello") { GW = m.w; GH = m.h; $("device").textContent = ""; resize(); pushConfig(); setupGenerations(m.generations, m.generation); }
+  else if (m.type === "generation") setGeneration(m.generation);
   else if (m.type === "floor") { tiles = Array.from({ length: GH }, () => new Array(GW).fill(-1)); monsters.clear(); hero = null; heroDraw = null; $("died").classList.remove("show"); }
   else if (m.type === "frame") onFrame(m);
   else if (m.type === "death") {
     stats.runs++; shake = 1;
+    const gs = genStats.get(genLabel(m.generation)) ?? { runs: 0, depth: 0, best: 0, kills: 0 };
+    gs.runs++; gs.depth += m.depth; gs.kills += m.kills; gs.best = Math.max(gs.best, m.depth);
+    genStats.set(genLabel(m.generation), gs); renderGenStats();
     $("diedSub").textContent = `B${m.depth}F / Lv${m.level} / 撃破 ${m.kills} / 金貨 ${m.gold} / ${m.turn} ターン`;
     $("died").classList.add("show");
   }
 };
 
 // ---------------------------------------------------------------- controls
-let paused = false, guarded = true;
+let paused = false;
+function setupGenerations(list, current) {
+  $("gens").innerHTML = "";
+  for (const name of [null, ...list]) {
+    const b = document.createElement("button");
+    b.textContent = genLabel(name); b.dataset.gen = name ?? "";
+    b.onclick = () => send({ type: "generation", name });
+    $("gens").appendChild(b);
+  }
+  setGeneration(current);
+}
+function setGeneration(name) {
+  generation = name;
+  for (const b of $("gens").children) b.classList.toggle("on", b.dataset.gen === (name ?? ""));
+  $("genNow").textContent = genLabel(name);
+  renderGenStats();
+}
+function renderGenStats() {
+  const names = [...$("gens").children].map(b => genLabel(b.dataset.gen || null));
+  $("genStats").innerHTML = names.map(n => {
+    const s = genStats.get(n);
+    return `<tr class="${n === genLabel(generation) ? "now" : ""}"><td>${n}</td><td>${s ? s.runs : "–"}</td><td>${s ? "B" + (s.depth / s.runs).toFixed(1) + "F" : "–"}</td><td>${s ? "B" + s.best + "F" : "–"}</td><td>${s ? (s.kills / s.runs).toFixed(1) : "–"}</td></tr>`;
+  }).join("");
+}
 function delayFromSlider() { const v = +$("speed").value; return v >= 100 ? 0 : Math.pow(1 - v / 100, 2.2) * 1.0; }
 function pushConfig() {
   const d = delayFromSlider();
   $("speedv").textContent = d === 0 ? "MAX" : `${(1 / (d + 0.02)).toFixed(d > 0.2 ? 1 : 0)} 手/秒`;
-  send({ type: "config", delay: d, paused, guarded });
+  send({ type: "config", delay: d, paused });
 }
 $("speed").oninput = pushConfig;
 $("pause").onclick = () => { paused = !paused; $("pause").classList.toggle("on", paused); $("pause").querySelector("span").textContent = paused ? "再開" : "一時停止"; pushConfig(); };
 $("step").onclick = () => { if (!paused) $("pause").onclick(); send({ type: "step" }); };
-$("guard").onclick = () => { guarded = !guarded; $("guard").classList.toggle("on", guarded); $("guard").querySelector("span").textContent = guarded ? "安全装置 ON" : "安全装置 OFF"; pushConfig(); };
 $("restart").onclick = () => send({ type: "restart" });
 addEventListener("keydown", e => {
   if (e.code === "Space") { e.preventDefault(); $("pause").onclick(); }
   else if (e.key === ".") $("step").onclick();
-  else if (e.key === "g" || e.key === "G") $("guard").onclick();
   else if (e.key === "r" || e.key === "R") $("restart").onclick();
 });
 
@@ -210,11 +246,10 @@ function onFrame(m) {
   }
   hero = m.hero;
   if (!heroDraw) heroDraw = { x: hero.x, y: hero.y };
-  danger += (m.decision.danger - danger) * 0.35;
+  danger += (Math.max(0, 1 - 2 * hero.hp / hero.max_hp) - danger) * 0.35;   // HP が半分を切ると画面の縁が赤くなる
 
   const d = m.decision, now = performance.now();
-  stats.stamps.push(now); stats.ms.push(d.ms); if (stats.ms.length > 120) stats.ms.shift();
-  stats.n++; stats.agree += d.proposed === d.best; stats.veto += d.intervened;
+  stats.stamps.push(now); if (d.ms) { stats.ms.push(d.ms); if (stats.ms.length > 120) stats.ms.shift(); }
   stats.best = Math.max(stats.best, hero.depth);
   for (const line of m.log) { const el = document.createElement("div"); el.textContent = line; $("log").appendChild(el); }
   while ($("log").children.length > 6) $("log").firstChild.remove();
@@ -226,7 +261,6 @@ setInterval(() => {                       // パネルは 10Hz。毎フレーム
   stats.stamps = stats.stamps.filter(s => now - s < 1000);
   $("rate").textContent = stats.stamps.length;
   if (stats.ms.length) { const s = [...stats.ms].sort((a, b) => a - b); $("ms").textContent = `${s[s.length >> 1].toFixed(1)} ms`; }
-  if (stats.n) { $("agree").textContent = Math.round(stats.agree / stats.n * 100) + "%"; $("vetoRate").textContent = (stats.veto / stats.n * 100).toFixed(1) + "%"; }
   $("best").textContent = `B${stats.best}F`; $("runs").textContent = stats.runs;
   const m = pendingPanel; if (!m) return; pendingPanel = null;
   const h = m.hero, f = h.hp / h.max_hp;
@@ -237,15 +271,10 @@ setInterval(() => {                       // パネルは 10Hz。毎フレーム
   const d = m.decision;
   $("state").textContent = d.state;
   const acts = ORDER.filter(a => a in d.probs);
-  $("acts").innerHTML = acts.map(a => {
-    const c = d.criteria?.[a] ?? "", tag = c.split(".")[0], rest = c.slice(tag.length + 1);
-    const vetoed = a === d.proposed && d.intervened;
-    const cls = a === d.action ? "done" : vetoed ? "vetoed" : "";
-    return `<div class="act ${cls}"><span class="mark">${a === d.action ? "▶" : vetoed ? "×" : ""}</span><span class="name">${JP[a]}</span>`
-      + `<div class="track"><div class="fill" style="width:${(d.probs[a] * 100).toFixed(1)}%"></div></div><span class="pct">${Math.round(d.probs[a] * 100)}%</span>`
-      + `<div class="why"><b class="${tag === "Bad" ? "bad" : tag === "Fine" ? "fine" : ""}">${tag}.</b>${rest.replace(/</g, "&lt;")}</div></div>`;
-  }).join("");
-  $("veto").textContent = d.intervened ? `！安全装置が介入: 「${JP[d.proposed]}」→「${JP[d.action]}」` : "";
+  $("acts").innerHTML = acts.map(a =>
+    `<div class="act ${a === d.action ? "done" : ""}"><span class="mark">${a === d.action ? "▶" : ""}</span><span class="name">${JP[a]}</span>`
+    + `<div class="track"><div class="fill" style="width:${(d.probs[a] * 100).toFixed(1)}%"></div></div><span class="pct">${Math.round(d.probs[a] * 100)}%</span></div>`
+  ).join("");
 }, 100);
 
 // ---------------------------------------------------------------- canvas
@@ -307,7 +336,7 @@ function draw(now) {
   }
   g.globalAlpha = 1;
   g.restore();
-  if (danger > 0.08) {                     // Laya の「死の危険」確率を赤いビネットで見せる
+  if (danger > 0.08) {                     // 瀕死になるほど画面の縁が赤く脈打つ
     const W_ = cv.clientWidth, H_ = T * GH, pulse = 0.75 + 0.25 * Math.sin(now / (260 - danger * 160));
     const v = g.createRadialGradient(W_ / 2, H_ / 2, H_ * .35, W_ / 2, H_ / 2, H_ * .95);
     v.addColorStop(0, "rgba(160,0,0,0)"); v.addColorStop(1, `rgba(190,10,10,${Math.min(.75, danger * .8) * pulse})`);
