@@ -67,7 +67,12 @@ Your outputs:
 - tactic (only matters while an awake enemy is in view): "fight" = fleeing and waiting are removed. "flee" = attacking and approaching are removed (running, stairs and potions remain). "free" = no constraint.
 - heal_now: true = drink a healing potion on the next turn if one is available.
 - reason: one short sentence in Japanese (shown to the player).
-Be decisive. Prefer "free" only when you have no real preference."""
+
+Measured facts about this version (hundreds of runs), which override general roguelike intuition:
+- The action model was trained by self-play and already plays about as well as hand-written rules (mean depth ~9-10). Its moment-to-moment combat choices are good. Every constraint you set replaced its judgement in past runs and made results WORSE (mean depth 4.5 with a strategist that liked "explore_fully" + "fight", vs 10 without).
+- Lingering on shallow levels is bad: wandering hobgoblins kill a level-1 hero on levels 1-2. A policy that descends as soon as the stairs are found reaches depth ~9-10; one that explores every level fully reaches ~7. Experience comes fast enough from monsters met on the way down.
+- The real wall is dungeon levels 8-13 (centaur, troll, quagga, yeti) with a hero of experience level 4-6. Starting armor two points better adds about 2.4 levels of depth, so picking up and wearing better armor matters more than anything else you can influence.
+So: default to plan="free", rest=false, tactic="free", heal_now=false, and deviate only when the situation clearly calls for it (for example: "descend_asap" when hungry with no food or when a deadly monster is near and the stairs are known; "rest"=true before descending deeper with low HP and no enemy around; "flee" with known stairs against a monster that will clearly win)."""
 
 
 def situation(g, trigger, st):
