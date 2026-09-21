@@ -62,6 +62,8 @@ def play_llm(make_brain, seeds, max_turns, model):
         st = Strategist(model=model)
         r = play(Guided(Locked(make_brain(), lock), st), seed, max_turns)
         stats.append(st)
+        (DATA / f"llm_{seed}.json").write_text(json.dumps({"result": {k: v for k, v in r.items() if k != "ms"}, "history": st.history},
+                                                          ensure_ascii=False, indent=1), encoding="utf-8")
         print(f"    seed {seed}: {r['depth']} 階 {r['end']} / 方針役 {st.calls} 回 {st.seconds:.0f}s {st.tokens} tokens" + (f" / 停止: {st.stopped}" if st.stopped else ""), flush=True)
         return r
 

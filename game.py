@@ -355,8 +355,10 @@ class Game:
         return True
 
     def _bfs_path(self, goal_fn):
-        """勇者から goal_fn を満たす最寄りマスへの経路。既知のマスだけを通り、モンスターは避ける。"""
-        blocked = {(m["x"], m["y"]) for m in self.monsters}
+        """勇者から goal_fn を満たす最寄りマスへの経路。既知のマスだけを通り、見えているモンスターは避ける。
+        見えていないモンスターまで避けると、扉の前で眠っている 1 体のせいで「探索先なし」になり、待機しかできなくなる。"""
+        visible = self.visible
+        blocked = {(m["x"], m["y"]) for m in self.monsters if (m["x"], m["y"]) in visible}
         seen, nbr = self.seen, self._nbr
         start = (self.hx, self.hy)
         prev = {start: None}

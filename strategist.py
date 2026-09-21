@@ -133,6 +133,7 @@ class Strategist:
         self.calls = self.tokens = self.errors = 0
         self.seconds = 0.0
         self.stopped = None  # 自動停止した理由
+        self.history = []    # 相談の記録 (あとで方針役の判断を読み返すため)
         self.reset()
 
     def reset(self):
@@ -200,6 +201,8 @@ class Strategist:
         self.seconds += sec
         self.tokens += tokens
         self.plan, self.rest, self.tactic, self.heal_now, self.reason = d["plan"], d["rest"], d["tactic"], d["heal_now"], d["reason"]
+        self.history.append({"turn": g.turn, "depth": g.depth, "hp": g.hp, "max_hp": g.max_hp, "level": g.level, "kind": self.kind,
+                             "trigger": trigger, **d, "sec": round(sec, 1)})
         return {"trigger": trigger, "kind": self.kind, **d, "sec": round(sec, 1), "tokens": tokens, "calls": self.calls}
 
     # ------------------------------------------------------------------ 選択肢を絞る
