@@ -224,3 +224,35 @@ class RuleBrain:
         if a is None:
             a = next((x for x in ("pick_up", "explore", "descend") if x in valid), "rest")
         return {"action": a, "probs": {a: 1.0}, "state": "", "ms": 0.0}
+
+
+class DiverBrain:
+    """人間が書いた if 文その 2。階段を見つけたらすぐ降り、こまめに休み、眠っている敵も倒す。いまのところ最良の物差し。"""
+
+    name = "diver"
+
+    def decide(self, g):
+        valid = g.valid_actions()
+        mons = g.visible_monsters()
+        awake = [m for m in mons if m["awake"]]
+        hp = hp_word(g)
+        hurt = hp in ("low", "critical")
+        if hurt and "quaff_heal" in valid:
+            a = "quaff_heal"
+        elif "eat" in valid and g.hunger_word() != "fine":
+            a = "eat"
+        elif not awake and "quaff_str" in valid:
+            a = "quaff_str"
+        elif not awake and "equip" in valid:
+            a = "equip"
+        elif "attack" in valid:
+            a = "attack"
+        elif awake and "descend" in valid and not hurt:
+            a = "descend"
+        elif awake and "approach" in valid:
+            a = "approach"
+        elif not awake and hp in ("wounded", "low", "critical") and g.hunger_word() == "fine":
+            a = "rest"
+        else:
+            a = next((x for x in ("pick_up", "descend", "explore") if x in valid), "rest")
+        return {"action": a, "probs": {a: 1.0}, "state": "", "ms": 0.0}

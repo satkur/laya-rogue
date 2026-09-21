@@ -10,10 +10,10 @@
 
 ```
 uv sync
-uv run learn.py 14 800    # 自己対戦で経験表を作る（CPU のみ、低優先度で 1 時間前後）
-uv run train.py 14 gen14  # 14 ラウンド目の表を Laya の判断ヘッドに学習させる（GPU、数分）
+uv run learn.py 6 800     # 自己対戦で経験表を作る（CPU のみ、低優先度で約 10 分）
+uv run train.py 6 gen6 30 # 6 ラウンド目の表を Laya の判断ヘッドに学習させる（GPU、約 6 分）
 uv run server.py          # http://127.0.0.1:8766/ が開く
-uv run sim.py 40 8000 random rules table:14 laya laya:gen14+descend   # 画面なしで成績比較
+uv run sim.py 16 8000 random rules diver table:6 laya laya:gen6+cautious   # 画面なしで成績比較
 ```
 
 学習済みの重みはリポジトリに含めていない（`weights/` は .gitignore）。未学習のままでも `server.py` は動く。

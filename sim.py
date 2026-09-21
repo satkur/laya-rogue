@@ -2,7 +2,7 @@
 
     uv run sim.py [回数] [最大ターン] [頭脳...]
 
-頭脳: random / rules / table:<ラウンド> / laya (未学習) / laya:<世代名>
+頭脳: random / rules / diver / table:<ラウンド> / laya (未学習) / laya:<世代名>
       +<命令> で命令を固定 (cautious / aggressive / loot / descend、既定は aggressive)
       @<鋭さ> で行動の引き方を変える (@max で常に最有力、既定は 2.5)
 例:   uv run sim.py 40 8000 random rules table:12+descend laya laya:gen12+cautious
@@ -16,7 +16,7 @@ from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-from brain import DEFAULT_ORDER, RandomBrain, RuleBrain, TableBrain
+from brain import DEFAULT_ORDER, DiverBrain, RandomBrain, RuleBrain, TableBrain
 from game import Game
 
 DATA = Path(__file__).parent / "data"
@@ -34,6 +34,8 @@ def make_cpu_brain(spec):
         return RandomBrain(random.Random(0))
     if spec == "rules":
         return RuleBrain()
+    if spec == "diver":
+        return DiverBrain()
     if spec.startswith("table:"):
         brain = TableBrain(json.loads((DATA / f"table_r{spec[6:]}.json").read_text(encoding="utf-8")), sharpness)
         brain.order = order
