@@ -18,12 +18,11 @@ from pathlib import Path
 
 import torch
 
-from brain import ACTION_DESC, INSTRUCTIONS, WEIGHTS
+from brain import ACTION_DESC, INSTRUCTIONS, TAU, WEIGHTS
 from laya import Router
 from laya.common import build_sequence
 
 DATA = Path(__file__).parent / "data"
-TAU = 1.0          # リターン差 1 点を確率比 e 倍として教える
 MIN_WEIGHT = 4.0   # 経験がこれ未満の状況は教えない。戦闘は死亡の減点で振れ幅が大きく、数件の平均はあてにならない
 BATCH = 64
 LR = 2e-4
