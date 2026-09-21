@@ -11,19 +11,19 @@
   /* 80〜90年代のレトロ PC 風の構成 (ドットフォント・枠線ウィンドウ) に、ファンタジー RPG の配色。
      古びた金の枠、羊皮紙色の文字、暗い石の地。色数は絞り、赤と緑は体力と危険にだけ使う。 */
   :root {
-    --bg: #0b0907; --panel: #12100c; --frame: #8a6d3b; --frame-hi: #c9a45c; --sel: #33201a;
-    --text: #e6d9b8; --dim: #958a6c; --faint: #4a4232; --track: #241f17;
-    --accent: #dcb65a; --ok: #7fa35f; --warn: #d19a3e; --bad: #b8433a;
+    --bg: #070605; --panel: #0d0b08; --frame: #6e562e; --frame-hi: #a88a4c; --sel: #2a1a15;
+    --text: #cfc3a3; --dim: #7d7359; --faint: #3a3427; --track: #1a1610;
+    --accent: #c4a150; --ok: #6c8c52; --warn: #b78636; --bad: #a23a32;
     --font: "DotGothic16", "MS Gothic", "ＭＳ ゴシック", monospace;
   }
   * { box-sizing: border-box; border-radius: 0 !important; }
   html { background: var(--bg); }
   body { margin: 0; min-height: 100vh; padding-bottom: 80px; background: var(--bg); color: var(--text); font: 16px/1.4 var(--font);
-         text-shadow: 0 0 4px rgba(220, 170, 90, .18); -webkit-font-smoothing: none; }
+         text-shadow: 0 0 4px rgba(200, 150, 80, .14); -webkit-font-smoothing: none; }
   body::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 50;
-    background: radial-gradient(ellipse at center, transparent 62%, rgba(0, 0, 0, .5) 100%); }
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, .62) 100%); }
 
-  header { display: flex; align-items: center; gap: 16px; padding: 3px 12px; background: #1d140e; color: var(--text); border-bottom: 2px solid var(--frame); }
+  header { display: flex; align-items: center; gap: 16px; padding: 3px 12px; background: #140e0a; color: var(--text); border-bottom: 2px solid var(--frame); }
   header h1 { font: 400 16px/1.4 var(--font); margin: 0; letter-spacing: .12em; }
   header h1 span { color: var(--accent); }
   header .ver { color: var(--frame-hi); }
@@ -55,7 +55,7 @@
   .cell .v { color: var(--accent); font-size: 20px; line-height: 1.2; }
   .cell .k { color: var(--dim); font-size: 14px; }
 
-  #state { color: #b9ad8a; min-height: 46px; margin-bottom: 6px; }
+  #state { color: #a3987a; min-height: 46px; margin-bottom: 6px; }
   #state::before { content: "A>"; color: var(--dim); margin-right: 6px; }
   .act { display: grid; grid-template-columns: 16px 58px 1fr 44px; gap: 6px; align-items: center; padding: 1px 2px; }
   .act .mark { color: var(--accent); }
