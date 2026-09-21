@@ -3,9 +3,9 @@
     uv run sim.py [回数] [最大ターン] [頭脳...]
 
 頭脳: random / rules / diver / table:<ラウンド> / laya (未学習) / laya:<世代名>
-      +<命令> で命令を固定 (cautious / aggressive / loot / descend、既定は aggressive)
       @<鋭さ> で行動の引き方を変える (@max で常に最有力、既定は 2.5)
-例:   uv run sim.py 40 8000 random rules table:12+descend laya laya:gen12+cautious
+      +llm / +llm:sonnet で方針役の LLM を付ける (strategist.py。claude -p を呼ぶので 1 ゲーム数分かかり、利用枠を使う)
+例:   uv run sim.py 40 8000 random rules table:12 laya laya:gen12@max
 """
 import json
 import random
@@ -16,20 +16,63 @@ from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-from brain import DEFAULT_ORDER, DiverBrain, RandomBrain, RuleBrain, TableBrain
+from brain import DiverBrain, RandomBrain, RuleBrain, TableBrain
 from game import Game
 
 DATA = Path(__file__).parent / "data"
 
 
+LLM_GAMES = 4  # 方針役つきのゲームを同時に進める数 (待ち時間のほとんどは claude -p の応答)
+
+
 def split_spec(spec):
     spec, _, sh = spec.partition("@")
-    spec, _, order = spec.partition("+")
-    return spec, order or DEFAULT_ORDER, (2.5 if not sh else None if sh == "max" else float(sh))
+    return spec, (2.5 if not sh else None if sh == "max" else float(sh))
+
+
+def split_llm(spec):
+    spec, plus, llm = spec.partition("+llm")
+    return spec, (llm[1:] or "opus") if plus else None
+
+
+class Locked:
+    """1 つの頭脳 (GPU 上の Laya) を複数のゲームのスレッドから順番に使う。"""
+
+    def __init__(self, brain, lock):
+        self.brain, self.lock, self.name = brain, lock, brain.name
+
+    def decide(self, g):
+        with self.lock:
+            return self.brain.decide(g)
+
+
+def play_llm(make_brain, seeds, max_turns, model):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    import strategist
+    from strategist import Guided, Strategist
+
+    strategist.MAX_CALLS_TOTAL = strategist.MAX_CALLS_PER_GAME * len(seeds)  # 明示的に頼まれた比較なので、1 ゲームあたりの上限だけを効かせる
+
+    lock = threading.Lock()
+    stats = []
+
+    def one(seed):
+        st = Strategist(model=model)
+        r = play(Guided(Locked(make_brain(), lock), st), seed, max_turns)
+        stats.append(st)
+        print(f"    seed {seed}: {r['depth']} 階 {r['end']} / 方針役 {st.calls} 回 {st.seconds:.0f}s {st.tokens} tokens" + (f" / 停止: {st.stopped}" if st.stopped else ""), flush=True)
+        return r
+
+    with ThreadPoolExecutor(LLM_GAMES) as pool:
+        results = list(pool.map(one, seeds))
+    print(f"    方針役の合計: {sum(s.calls for s in stats)} 回, {sum(s.tokens for s in stats)} tokens", flush=True)
+    return results
 
 
 def make_cpu_brain(spec):
-    spec, order, sharpness = split_spec(spec)
+    spec, sharpness = split_spec(spec)
     if spec == "random":
         return RandomBrain(random.Random(0))
     if spec == "rules":
@@ -37,9 +80,7 @@ def make_cpu_brain(spec):
     if spec == "diver":
         return DiverBrain()
     if spec.startswith("table:"):
-        brain = TableBrain(json.loads((DATA / f"table_r{spec[6:]}.json").read_text(encoding="utf-8")), sharpness)
-        brain.order = order
-        return brain
+        return TableBrain(json.loads((DATA / f"table_r{spec[6:]}.json").read_text(encoding="utf-8")), sharpness)
     raise ValueError(spec)
 
 
@@ -82,23 +123,26 @@ def main():
     seeds = [5000 + i for i in range(runs)]
     print(f"{runs} 回 × 最大 {max_turns} ターン (全頭脳で同じシード)\n")
     laya = None
-    for spec in specs:
+    for full in specs:
         t0 = time.perf_counter()
+        spec, llm = split_llm(full)
         if spec.startswith("laya"):
             from brain import LayaBrain
 
-            name, order, sharpness = split_spec(spec)
+            name, sharpness = split_spec(spec)
             gen = name[5:] or None
             if laya is None:
                 laya = LayaBrain(gen)
             else:
                 laya.load_generation(gen)
-            laya.order, laya.sharpness = order, sharpness
-            results = [play(laya, s, max_turns) for s in seeds]
+            laya.sharpness = sharpness
+            results = play_llm(lambda: laya, seeds, max_turns, llm) if llm else [play(laya, s, max_turns) for s in seeds]
+        elif llm:
+            results = play_llm(lambda: make_cpu_brain(spec), seeds, max_turns, llm)
         else:
             with ProcessPoolExecutor() as pool:
                 results = list(pool.map(_cpu_job, [(spec, s, max_turns) for s in seeds], chunksize=2))
-        report(spec, results, time.perf_counter() - t0)
+        report(full, results, time.perf_counter() - t0)
 
 
 if __name__ == "__main__":
