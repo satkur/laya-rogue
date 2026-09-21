@@ -8,7 +8,8 @@
   3. 先読みの結果を得点 (score) の増減で測り、(状況文, 行動) ごとに平均して表に足す
 次のラウンドは賢くなった表で潜るので、より先の局面の経験が溜まっていく。
 
-人間が与えるのは score() の「何が嬉しいか」だけ。どの行動が良いかは一切与えない。
+人間が与えるのは WANTS の「命令ごとに何が嬉しいか」だけ。どの行動が良いかは一切与えない。
+潜っている途中で命令をランダムに切り替えるので、どの深さの局面もすべての命令のもとで経験される。
 ラウンドごとの表は data/table_r<N>.json に保存し、train.py がそれを Laya に学習させる。
 """
 import json
@@ -20,7 +21,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-from brain import describe, state_key
+from brain import ORDERS, describe, state_key
 from game import Game
 
 DATA = Path(__file__).parent / "data"
@@ -30,12 +31,21 @@ P_EVAL = 0.12      # 通過した局面のうち、先読みで調べる割合
 MAX_TURNS = 500
 EPSILON = 0.15     # 表を無視して気まぐれに動く確率 (知らない局面に出会うため)
 DECAY = 0.5        # ラウンドをまたぐとき、古い経験の重みをこれだけ残す
+ORDER_SPAN = 60    # 学習中、このターン数ごとに命令を引き直す
+
+# 命令ごとの「何が嬉しいか」。(到達階, 撃破, 金貨, 体力の割合, 薬, 見たマス, 死)
+WANTS = {
+    "cautious":   dict(depth=4,  kills=0.5, gold=0.02, hp=10, potions=3, explored=0.005, death=60),
+    "aggressive": dict(depth=6,  kills=3.0, gold=0.02, hp=3,  potions=1, explored=0.010, death=20),
+    "loot":       dict(depth=3,  kills=1.0, gold=0.15, hp=4,  potions=4, explored=0.030, death=30),
+    "descend":    dict(depth=20, kills=0.5, gold=0.02, hp=3,  potions=1, explored=0.010, death=30),
+}
 
 
-def score(g):
-    """何が嬉しいか。深く潜る・倒す・拾う・体力と薬を保つ・未知を減らす。死は大損。"""
-    return (10 * g.depth + 1.5 * g.kills + 0.04 * g.gold + 5 * g.hp / g.max_hp + 2 * g.potions
-            + 0.01 * g.explored - (30 if g.dead else 0))
+def score(g, order):
+    w = WANTS[order]
+    return (w["depth"] * g.depth + w["kills"] * g.kills + w["gold"] * g.gold + w["hp"] * g.hp / g.max_hp
+            + w["potions"] * g.potions + w["explored"] * g.explored - (w["death"] if g.dead else 0))
 
 
 def pick(table, key, valid, rng, temp, eps):
@@ -48,17 +58,17 @@ def pick(table, key, valid, rng, temp, eps):
     return rng.choices(valid, weights)[0]
 
 
-def rollout(g, action, table, seed):
+def rollout(g, action, order, table, seed):
     rng = random.Random(seed)
     sim = g.clone(seed)
-    before = score(sim)
+    before = score(sim, order)
     sim.step(action)
     for _ in range(HORIZON - 1):
         if sim.dead:
             break
         valid = sim.valid_actions()
-        sim.step(pick(table, state_key(describe(sim, valid), valid), valid, rng, 0.5, 0.05))
-    return score(sim) - before
+        sim.step(pick(table, state_key(describe(sim, valid, order), valid), valid, rng, 0.5, 0.05))
+    return score(sim, order) - before
 
 
 _table = {}
@@ -74,13 +84,16 @@ def episode(seed):
     rng = random.Random(seed)
     g = Game(rng.randrange(1 << 30))
     out = []
+    order = rng.choice(ORDERS)
     while not g.dead and g.turn < MAX_TURNS:
+        if g.turn % ORDER_SPAN == 0:
+            order = rng.choice(ORDERS)
         valid = g.valid_actions()
-        key = state_key(describe(g, valid), valid)
+        key = state_key(describe(g, valid, order), valid)
         if len(valid) > 1 and rng.random() < P_EVAL:
             # 行動どうしの比較では同じ乱数列を使う。「運の差」が消えて「行動の差」だけが残る
             seeds = [rng.random() for _ in range(ROLLOUTS)]
-            out.append((key, {a: sum(rollout(g, a, _table, s) for s in seeds) / ROLLOUTS for a in valid}))
+            out.append((key, {a: sum(rollout(g, a, order, _table, s) for s in seeds) / ROLLOUTS for a in valid}))
         g.step(pick(_table, key, valid, rng, 1.0, EPSILON))
         g.log.clear()
     return out, g.depth, g.dead

@@ -1,4 +1,4 @@
-"""Laya Rogue: Laya が勇者を操作してダンジョンに潜り続けるのを眺めるデモ。
+"""Laya Rogue: 人間が命令を出し、Laya が勇者を操作してダンジョンに潜る。
 
     uv run server.py            # モデルを読み込み、ブラウザを開く
     uv run server.py --no-open
@@ -13,7 +13,7 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
-from brain import WEIGHTS, LayaBrain
+from brain import ORDERS, WEIGHTS, LayaBrain
 from game import H, W, Game
 
 HOST, PORT = "127.0.0.1", 8766
@@ -71,7 +71,8 @@ def frame(g, d, log_from):
 async def ws(sock: WebSocket):
     await sock.accept()
     cfg = {"delay": 0.147, "paused": False, "step": False, "restart": False}
-    await sock.send_json({"type": "hello", "w": W, "h": H, "generations": generations(), "generation": brain.generation})
+    await sock.send_json({"type": "hello", "w": W, "h": H, "generations": generations(), "generation": brain.generation,
+                          "orders": ORDERS, "order": brain.order})
 
     async def play():
         while True:
@@ -107,6 +108,9 @@ async def ws(sock: WebSocket):
                 cfg["step"] = True
             elif m["type"] == "restart":
                 cfg["restart"] = True
+            elif m["type"] == "order" and m.get("name") in ORDERS:  # 次の 1 手から効く
+                brain.order = m["name"]
+                await sock.send_json({"type": "order", "order": brain.order})
             elif m["type"] == "generation":  # 世代を替えたら、その頭脳で最初から潜り直す
                 gen = m.get("name")
                 if gen is None or gen in generations():

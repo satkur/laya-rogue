@@ -17,7 +17,7 @@
   }
   * { box-sizing: border-box; border-radius: 0 !important; }
   html { background: #00000c; }
-  body { margin: 0; min-height: 100vh; padding-bottom: 44px; background: #00000c; color: var(--white); font: 16px/1.4 var(--font);
+  body { margin: 0; min-height: 100vh; padding-bottom: 80px; background: #00000c; color: var(--white); font: 16px/1.4 var(--font);
          text-shadow: 0 0 5px rgba(140, 220, 255, .28); -webkit-font-smoothing: none; }
   body::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 50;
     background: radial-gradient(ellipse at center, transparent 62%, rgba(0, 0, 0, .5) 100%); }
@@ -84,9 +84,14 @@
   footer button.on { color: var(--yellow); }
   footer button.on kbd { background: var(--yellow); }
   footer .spacer { flex: 1; }
-  footer .gens { display: flex; align-items: center; gap: 4px; color: var(--cyan); margin-left: 12px; }
+  footer { flex-wrap: wrap; }
+  footer .gens, footer .orders { display: flex; align-items: center; gap: 4px; color: var(--cyan); margin-left: 12px; }
   footer .gens button { padding: 2px 8px; border: 1px solid var(--dgray); }
   footer .gens button.on { border-color: var(--yellow); }
+  footer .orders button { padding: 2px 10px 2px 0; border: 1px solid var(--dgray); }
+  footer .orders button.on { border-color: var(--yellow); background: var(--navy); }
+  #order { color: var(--yellow); font-size: 20px; margin-bottom: 4px; }
+  #order::before { content: "命令:"; color: var(--gray); font-size: 16px; margin-right: 8px; }
   footer label { display: flex; align-items: center; gap: 8px; color: var(--cyan); }
   footer label b { font-weight: 400; color: var(--yellow); min-width: 84px; }
   input[type=range] { -webkit-appearance: none; appearance: none; width: 180px; height: 14px; background: repeating-linear-gradient(90deg, var(--dgray) 0 4px, transparent 4px 8px); outline: none; }
@@ -117,12 +122,13 @@
         <div class="cell"><div class="v" id="gold">0</div><div class="k">金貨</div></div>
         <div class="cell"><div class="v" id="kills">0</div><div class="k">撃破</div></div>
         <div class="cell"><div class="v" id="turn">0</div><div class="k">ターン</div></div>
-        <div class="cell"><div class="v" id="best">1</div><div class="k">最深記録</div></div>
-        <div class="cell"><div class="v" id="runs">0</div><div class="k">挑戦回数</div></div>
+        <div class="cell"><div class="v" id="score">0</div><div class="k">SCORE</div></div>
+        <div class="cell"><div class="v" id="hiscore">0</div><div class="k">HI-SCORE</div></div>
       </div>
     </fieldset>
     <fieldset>
       <legend>LAYA の判断<em id="ms">– ms</em></legend>
+      <div id="order">–</div>
       <div id="state"></div>
       <div id="acts"></div>
       <div class="grid">
@@ -143,6 +149,7 @@
   <button id="pause"><kbd>SPACE</kbd><span>一時停止</span></button>
   <button id="step"><kbd>.</kbd>1手進める</button>
   <button id="restart"><kbd>R</kbd>最初から</button>
+  <div class="orders">命令 <span id="orders"></span></div>
   <div class="gens">世代 <span id="gens"></span></div>
   <div class="spacer"></div>
   <label>SPEED <input type="range" id="speed" min="0" max="100" value="58"> <b id="speedv"></b></label>
@@ -152,12 +159,16 @@
 const $ = id => document.getElementById(id);
 const JP = { attack: "攻撃", approach: "接近", flee: "逃走", drink_potion: "回復薬", pick_up: "回収", explore: "探索", descend: "階段へ", rest: "休憩" };
 const ORDER = Object.keys(JP);
+const ORDER_JP = { cautious: "慎重に", aggressive: "攻めろ", loot: "漁れ", descend: "降りろ" };
+const scoreOf = h => h.depth * 100 + h.kills * 10 + h.gold;
+let order = null, hiscore = 0;
+try { hiscore = +localStorage.getItem("laya-rogue-hiscore") || 0; } catch {}
 const GLYPH = { rat: ["r", "#c8843c"], goblin: ["g", "#55ff55"], ogre: ["O", "#ff5555"], potion: ["!", "#ff55ff"], gold: ["$", "#ffff55"] };
 const FONT = '"DotGothic16", "MS Gothic", monospace';
 
 let GW = 48, GH = 26, T = 20;
 let tiles = [], lit = new Set(), hero = null, heroDraw = null, monsters = new Map(), items = [], floats = [], danger = 0, shake = 0, flash = 0;
-const stats = { stamps: [], ms: [], best: 1, runs: 0 };
+const stats = { stamps: [], ms: [] };
 const genStats = new Map();   // 世代名 -> { runs, depth, best, kills }
 let generation = null;
 const genLabel = g => g ?? "未学習";
@@ -168,12 +179,13 @@ const send = o => ws.readyState === 1 && ws.send(JSON.stringify(o));
 ws.onclose = () => { $("device").textContent = "切断されました（server.py を再起動してください）"; };
 ws.onmessage = ev => {
   const m = JSON.parse(ev.data);
-  if (m.type === "hello") { GW = m.w; GH = m.h; $("device").textContent = ""; resize(); pushConfig(); setupGenerations(m.generations, m.generation); }
+  if (m.type === "hello") { GW = m.w; GH = m.h; $("device").textContent = ""; resize(); pushConfig(); setupGenerations(m.generations, m.generation); setupOrders(m.orders, m.order); }
+  else if (m.type === "order") setOrder(m.order, true);
   else if (m.type === "generation") setGeneration(m.generation);
   else if (m.type === "floor") { tiles = Array.from({ length: GH }, () => new Array(GW).fill(-1)); monsters.clear(); hero = null; heroDraw = null; $("died").classList.remove("show"); }
   else if (m.type === "frame") onFrame(m);
   else if (m.type === "death") {
-    stats.runs++; shake = 1;
+    shake = 1;
     const gs = genStats.get(genLabel(m.generation)) ?? { runs: 0, depth: 0, best: 0, kills: 0 };
     gs.runs++; gs.depth += m.depth; gs.kills += m.kills; gs.best = Math.max(gs.best, m.depth);
     genStats.set(genLabel(m.generation), gs); renderGenStats();
@@ -184,6 +196,22 @@ ws.onmessage = ev => {
 
 // ---------------------------------------------------------------- controls
 let paused = false;
+function setupOrders(list, current) {
+  $("orders").innerHTML = "";
+  list.forEach((name, i) => {
+    const b = document.createElement("button");
+    b.innerHTML = `<kbd>${i + 1}</kbd>${ORDER_JP[name] ?? name}`; b.dataset.order = name;
+    b.onclick = () => send({ type: "order", name });
+    $("orders").appendChild(b);
+  });
+  setOrder(current, false);
+}
+function setOrder(name, shout) {
+  order = name;
+  for (const b of $("orders").children) b.classList.toggle("on", b.dataset.order === name);
+  $("order").textContent = ORDER_JP[name] ?? name;
+  if (shout && hero) floats.push({ x: hero.x, y: hero.y - 1, text: `「${ORDER_JP[name]}！」`, c: "#ffff55", life: 1.1, vy: -0.9 });
+}
 function setupGenerations(list, current) {
   $("gens").innerHTML = "";
   for (const name of [null, ...list]) {
@@ -221,6 +249,7 @@ addEventListener("keydown", e => {
   if (e.code === "Space") { e.preventDefault(); $("pause").onclick(); }
   else if (e.key === ".") $("step").onclick();
   else if (e.key === "r" || e.key === "R") $("restart").onclick();
+  else if ("1234".includes(e.key)) $("orders").children[+e.key - 1]?.click();
 });
 
 // ---------------------------------------------------------------- frame
@@ -250,7 +279,6 @@ function onFrame(m) {
 
   const d = m.decision, now = performance.now();
   stats.stamps.push(now); if (d.ms) { stats.ms.push(d.ms); if (stats.ms.length > 120) stats.ms.shift(); }
-  stats.best = Math.max(stats.best, hero.depth);
   for (const line of m.log) { const el = document.createElement("div"); el.textContent = line; $("log").appendChild(el); }
   while ($("log").children.length > 6) $("log").firstChild.remove();
   pendingPanel = m;
@@ -261,13 +289,15 @@ setInterval(() => {                       // パネルは 10Hz。毎フレーム
   stats.stamps = stats.stamps.filter(s => now - s < 1000);
   $("rate").textContent = stats.stamps.length;
   if (stats.ms.length) { const s = [...stats.ms].sort((a, b) => a - b); $("ms").textContent = `${s[s.length >> 1].toFixed(1)} ms`; }
-  $("best").textContent = `B${stats.best}F`; $("runs").textContent = stats.runs;
   const m = pendingPanel; if (!m) return; pendingPanel = null;
   const h = m.hero, f = h.hp / h.max_hp;
   $("depth").textContent = `B${h.depth}F`;
   $("hp").style.width = f * 100 + "%"; $("hpbar").style.setProperty("--c", f <= .25 ? "var(--red)" : f <= .5 ? "var(--yellow)" : "var(--green)");
   $("hpv").textContent = `${h.hp}/${h.max_hp}`; $("lv").textContent = h.level; $("pot").textContent = h.potions;
   $("gold").textContent = h.gold; $("kills").textContent = h.kills; $("turn").textContent = m.turn;
+  const sc = scoreOf(h);
+  if (sc > hiscore) { hiscore = sc; try { localStorage.setItem("laya-rogue-hiscore", hiscore); } catch {} }
+  $("score").textContent = sc; $("hiscore").textContent = hiscore;
   const d = m.decision;
   $("state").textContent = d.state;
   const acts = ORDER.filter(a => a in d.probs);

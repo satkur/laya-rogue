@@ -5,6 +5,9 @@
   - いま実行できる行動を列挙し、それぞれが何をするかを中立に説明する (ACTION_DESC)
 どの行動が良いかは一切教えない。安全装置もない。選ぶのは Laya。
 
+人間は方針役。状況文の先頭に命令 (ORDERS) が入り、Laya は同じ状況でも命令によって行動を変える。
+命令ごとに「何が嬉しいか」を変えて自己対戦させてあるので (learn.py)、命令の意味は Laya が経験から覚えたもの。
+
 素の Laya はこの形式だとランダム以下なので (NOTES.md)、learn.py の自己対戦で得た経験を
 判断ヘッドに学習させた重み (weights/*.pt) を載せて使う。
 """
@@ -14,7 +17,9 @@ import time
 from pathlib import Path
 
 WEIGHTS = Path(__file__).parent / "weights"
-INSTRUCTIONS = "You are the hero of a dungeon crawl. Choose the next action."
+INSTRUCTIONS = "You are the hero of a dungeon crawl. Follow the order and choose the next action."
+ORDERS = ["cautious", "aggressive", "loot", "descend"]
+DEFAULT_ORDER = "aggressive"
 ACTION_DESC = {
     "attack": "Hit the adjacent enemy.",
     "approach": "Move toward the nearest enemy.",
@@ -44,11 +49,11 @@ def dist_word(d):
     return "adjacent" if d == 1 else "near" if d <= 3 else "far"
 
 
-def describe(g, valid):
+def describe(g, valid, order):
     """状況文。数値を避けて語彙を絞ってあるので、同じ状況は同じ文になる (= 経験表のキーになる)。"""
     mons = g.visible_monsters()
     items = g.visible_items()
-    parts = [f"HP {hp_word(g)}.", "Potions: " + ("none" if g.potions == 0 else "one" if g.potions == 1 else "several") + "."]
+    parts = [f"Order: {order}.", f"HP {hp_word(g)}.", "Potions: " + ("none" if g.potions == 0 else "one" if g.potions == 1 else "several") + "."]
     if mons:
         seen = ", ".join(f"{m['kind']} {dist_word(g.dist(m['x'], m['y']))} ({threat_word(g, m)})" for m in mons[:3])
         parts.append(f"Enemies: {seen}" + (f" and {len(mons) - 3} more." if len(mons) > 3 else "."))
@@ -82,6 +87,7 @@ class LayaBrain:
     def __init__(self, generation=None, model="multilingual", sharpness=2.5):
         from laya import Router
 
+        self.order = DEFAULT_ORDER
         self.sharpness = sharpness
         self.rng = random.Random(0)
         self.agent = Router().load(model)
@@ -102,7 +108,7 @@ class LayaBrain:
 
     def decide(self, g):
         valid = g.valid_actions()
-        state = describe(g, valid)
+        state = describe(g, valid, self.order)
         if len(valid) == 1:  # 選びようがないときは推論しない
             return {"action": valid[0], "probs": {valid[0]: 1.0}, "state": state, "ms": 0.0}
         q = {"action": {"type": "choice", "instructions": INSTRUCTIONS, "criteria": {a: ACTION_DESC[a] for a in valid}}}
@@ -119,12 +125,13 @@ class TableBrain:
 
     def __init__(self, table, sharpness=2.5, rng=None):
         self.table = table
+        self.order = DEFAULT_ORDER
         self.sharpness = sharpness
         self.rng = rng or random.Random(0)
 
     def decide(self, g):
         valid = g.valid_actions()
-        state = describe(g, valid)
+        state = describe(g, valid, self.order)
         q = self.table.get(state_key(state, valid))
         if q is None:
             a, probs = self.rng.choice(valid), {x: 1 / len(valid) for x in valid}
