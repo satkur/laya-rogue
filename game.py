@@ -5,7 +5,9 @@
 ここで行い、「今なにをすべきか」の判断だけを外 (Laya) に委ねる。
 
 第 2 段階で実装していないもの (NOTES.md に一覧): 指輪・杖・未識別、巻物のうち識別系・解呪・眠り・召喚・恐怖・拘束・混乱・食料探知、
-隠し扉、迷路部屋、ドラゴンの炎、ファントムの透明化、ゼロックの擬態、呪い、26 階の魔除け。
+迷路部屋、ドラゴンの炎、ファントムの透明化、ゼロックの擬態、呪い、26 階の魔除け。
+隠し扉は本家どおり 3 階以降に出る (扉ごとに rnd(10) + 1 < 階 かつ 1/5)。壁に見え、隣で捜索すると 1 回につき 1/5 で見つかる。
+「捜索」は 1 手で、行き止まりの通路の先と部屋の壁沿いを順に歩いて探す (どこを探すかはプログラムが決める)。
 罠は本家の 7 種 (落とし穴・熊の罠・眠りガス・矢・転移・毒ダーツ・錆び) を出現数と効果の数値ごと入れてある。踏むまで見えず、踏んだ罠は以後よける。
 飛び道具は本家と違って弓を「構える」必要がなく、持っていれば矢に弓の威力が乗る (装備の持ち替えという操作を省いた)。
 強化・保護の巻物は拾った時点で読む (正体が分かっていて読めば必ず得なので、判断の余地がない)。
@@ -17,14 +19,14 @@ from collections import deque
 import rogue_data as D
 
 W, H = 80, 24
-ROCK, FLOOR, STAIRS, PASSAGE, DOOR, RWALL = 0, 1, 2, 3, 4, 5
+ROCK, FLOOR, STAIRS, PASSAGE, DOOR, RWALL, SDOOR = 0, 1, 2, 3, 4, 5, 6   # SDOOR = 隠し扉 (見つかるまで壁と同じ)
 PASSABLE = (FLOOR, STAIRS, PASSAGE, DOOR)
 DIRS = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
 VS_POISON, VS_MAGIC = 0, 3
 LAMP_DIST = 3
 
 ACTIONS = ["attack", "throw", "approach", "flee", "quaff_heal", "quaff_str", "read_map", "read_teleport",
-           "eat", "pick_up", "equip", "explore", "descend", "rest"]
+           "eat", "pick_up", "equip", "explore", "search", "descend", "rest"]
 
 
 def parse_dice(s):
@@ -109,7 +111,8 @@ class Game:
         c = Game.__new__(Game)
         c.__dict__.update(self.__dict__)
         c.rng = random.Random(seed)
-        c.seen = [row[:] for row in self.seen]  # tiles と rooms は階の途中で書き換えないので共有でよい
+        c.seen = [row[:] for row in self.seen]  # tiles と _nbr は隠し扉を見つけたときだけ書き換える (そのとき複製する) ので共有でよい
+        c.searched = dict(self.searched)
         c.monsters = [dict(m) for m in self.monsters]
         c.traps = [dict(t) for t in self.traps]
         c.items = [dict(i) for i in self.items]
@@ -137,6 +140,10 @@ class Game:
             self._build_map()
             if self._all_joined():
                 break
+        for y in range(H):  # 隠し扉 (rooms.c の door)。つながっていることを確かめたあとで隠す
+            for x in range(W):
+                if self.tiles[y][x] == DOOR and self.rnd(10) + 1 < self.depth and self.rnd(5) == 0:
+                    self.tiles[y][x] = SDOOR
         self._populate()
 
     def _build_map(self):
@@ -198,6 +205,7 @@ class Game:
                 if thing:
                     thing["x"], thing["y"] = self._floor_spot(rng.choice(real), taken)
                     self.items.append(thing)
+        self.searched = {}                      # 捜索した回数 (マスごと)
         self.traps = []
         if self.rnd(10) < self.depth:
             for _ in range(min(D.MAXTRAPS, self.rnd(self.depth // 4) + 1)):
@@ -354,7 +362,7 @@ class Game:
         for x, y in vis:
             if not self.seen[y][x]:
                 self.seen[y][x] = True
-                self.newly_seen.append((x, y, self.tiles[y][x]))
+                self.newly_seen.append((x, y, RWALL if self.tiles[y][x] == SDOOR else self.tiles[y][x]))
                 if self.tiles[y][x] != ROCK:
                     self.explored += 1
 
@@ -386,10 +394,12 @@ class Game:
         visible = self.visible
         awake = {(m["x"], m["y"]) for m in self.monsters if (m["x"], m["y"]) in visible and m["awake"]}
         asleep = {(m["x"], m["y"]) for m in self.monsters if (m["x"], m["y"]) in visible and not m["awake"]}
-        traps = {(t["x"], t["y"]) for t in self.traps if t["found"]}  # 踏んで分かった罠はよける
+        traps = {(t["x"], t["y"]) for t in self.traps if t["found"]}  # 踏んで分かった罠はよける (他に道がなければ踏んで通る)
         path = self._bfs(goal_fn, awake | asleep | traps)
         if path is None and asleep:
             path = self._bfs(goal_fn, awake | traps)
+        if path is None and traps:
+            path = self._bfs(goal_fn, awake)
         return path
 
     def _bfs(self, goal_fn, blocked):
@@ -426,6 +436,78 @@ class Game:
                 and self._monster_at(*path[0]) is None):
             path = self._explore = self._bfs_path(self._frontier) or []
         return path[0] if path else None
+
+    # ------------------------------------------------------------------ 隠し扉と捜索 (command.c の search)
+    def _reveal(self, x, y):
+        """隠し扉を扉にする。tiles と経路の隣接表は複製と共有しているので、書き換える前に自分の分を作る。"""
+        self.tiles = [row[:] for row in self.tiles]
+        self.tiles[y][x] = DOOR
+        self._nbr, self._nb8 = dict(self._nbr), dict(self._nb8)
+        for cx in range(x - 1, x + 2):
+            for cy in range(y - 1, y + 2):
+                if 0 <= cx < W and 0 <= cy < H and self.tiles[cy][cx] in PASSABLE:
+                    self._nbr[(cx, cy)] = tuple((cx + dx, cy + dy) for dx, dy in DIRS if self._step_ok(cx, cy, cx + dx, cy + dy))
+                    self._nb8[(cx, cy)] = tuple((cx + dx, cy + dy) for dx, dy in DIRS if 0 <= cx + dx < W and 0 <= cy + dy < H)
+        if self.seen[y][x]:
+            self.newly_seen.append((x, y, DOOR))
+        self._explore = []
+        self.say("隠し扉を見つけた")
+
+    def _search_class(self, c):
+        """捜索先の種類。0 = 通路の行き止まり (この地図では隠し扉か袋小路の節しかない)、1 = 部屋の壁ぎわ、None = 探す価値なし。
+        壁ぎわは、1 回の捜索が壁 3 マスぶんを調べるので、部屋の端から 3 マスおき (と端) に立つ。壁のすぐ外を既知の通路が通っていても
+        扉があるとは限らない (通過しているだけのことが多い) ので、特別扱いしない。"""
+        x, y = c
+        t = self.tiles[y][x]
+        if t == PASSAGE:
+            return 0 if sum(1 for n in self._nbr[c] if self.seen[n[1]][n[0]] or n in self.mapped) <= 1 else None
+        if t != FLOOR:
+            return None
+        r = self.room_at(x, y)
+        for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+            if self.tiles[y + dy][x + dx] not in (RWALL, SDOOR):  # 隠し扉は壁に見えている
+                continue
+            along, a, b = (x, r["x"] + 1, r["x"] + r["w"] - 2) if dy else (y, r["y"] + 1, r["y"] + r["h"] - 2)
+            if (along - a) % 3 == 1 or along == b:
+                return 1
+        return None
+
+    def _search_target(self):
+        """いちばん近い捜索先への経路 (自分のマスならその場)。行き止まりを先に、次に壁ぎわ、それぞれ上限まで。
+        全部使い切ったら、捜索した回数がいちばん少ない所から順に探し続ける (待って餓死するよりはよい)。"""
+        here = (self.hx, self.hy)
+        for want in (0, 1):
+            def ok(c):
+                return self._search_class(c) == want and self.searched.get(c, 0) < D.SEARCH_CAPS[want]
+            if ok(here):
+                return []
+            path = self._bfs_path(ok)
+            if path:
+                return path
+        spots = [c for c in self._nbr if (self.seen[c[1]][c[0]] or c in self.mapped) and self._search_class(c) is not None]
+        if not spots:
+            return None
+        fewest = min(self.searched.get(c, 0) for c in spots)
+        if self.searched.get(here, 0) == fewest and here in spots:
+            return []
+        return self._bfs_path(lambda c: c in spots and self.searched.get(c, 0) == fewest)
+
+    def _search(self):
+        here = (self.hx, self.hy)
+        path = self._search_target()
+        if path is None:
+            return
+        if path:
+            self._move_to(path[0])
+            return
+        self.searched[here] = self.searched.get(here, 0) + 1
+        for nx, ny in self._nb8[here]:
+            if self.tiles[ny][nx] == SDOOR and self.rnd(5) == 0:
+                self._reveal(nx, ny)
+            t = self._trap_at(nx, ny)
+            if t and not t["found"] and self.rnd(5) == 0:
+                t["found"] = True
+                self.say(f"{t['jp']}を見つけた")
 
     def _monster_at(self, x, y):
         return next((m for m in self.monsters if (m["x"], m["y"]) == (x, y)), None)
@@ -680,6 +762,8 @@ class Game:
             v.append("equip")
         if free and self._explore_step():
             v.append("explore")
+        elif free and not self.stairs_known() and self._search_target() is not None:
+            v.append("search")
         if free and self.stairs_known():
             v.append("descend")
         v.append("rest")
@@ -767,6 +851,8 @@ class Game:
         elif name == "magic mapping":
             for y in range(H):
                 for x in range(W):
+                    if self.tiles[y][x] == SDOOR:
+                        self._reveal(x, y)
                     if self.tiles[y][x] != ROCK and not self.seen[y][x] and (x, y) not in self.mapped:
                         self.mapped.add((x, y))
                         self.newly_seen.append((x, y, self.tiles[y][x]))
@@ -875,6 +961,8 @@ class Game:
             self._move_to(self._explore_step())
             if self._explore and (self.hx, self.hy) == self._explore[0]:
                 self._explore.pop(0)
+        elif action == "search":
+            self._search()
         elif action == "descend":
             if (self.hx, self.hy) == self.stairs:
                 self.new_floor()
