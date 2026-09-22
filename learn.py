@@ -44,11 +44,11 @@ P_CONTINUE = 0.6    # 控えておいた「階に着いた時点の状態」か�
 POOL_PER_DEPTH = 300
 
 # 何が嬉しいか。命令ごとに分けていたが、効きが弱かったのでいったん 1 本にしてある (NOTES.md)
-# 巻物の価値は「地図・転移を持っている」ことにだけ付ける。強化の巻物は読んで装備 (gear) が良くなったときに得点になる
-# (持っていること自体に点を付けると、読むと損になって読まなくなる。1 回目の学習で強化を読む率 22%、地図 1% になった失敗から)
+# 巻物の価値は「転移を持っている」ことにだけ付ける。強化の巻物は拾った時点で読まれて装備 (gear) の得点になる。地図は持っていても
+# 点にしない (持つことに点を付けると読むと損になり、1 回目の学習で地図を読む率が 1〜2% になった)
 WANTS = dict(depth=10, level=5, kills=0.5, gold=0.01, hp=5, heal=2.5, food=3, fed=6, gear=1.5, explored=0.006, death=50,
              missile=0.1, scroll=0.5)
-TACTICAL_SCROLLS = ("magic mapping", "teleportation")
+TACTICAL_SCROLLS = ("teleportation",)
 
 
 def score(g):

@@ -26,7 +26,6 @@ ACTION_DESC = {
     "flee": "Move away from the enemies.",
     "quaff_heal": "Drink a healing potion.",
     "quaff_str": "Drink a strength potion.",
-    "read_enchant": "Read a scroll that improves the armor or weapon.",
     "read_map": "Read the scroll of magic mapping.",
     "read_teleport": "Read the scroll of teleportation.",
     "eat": "Eat food.",
@@ -61,8 +60,7 @@ def count_word(n):
 
 
 def scroll_words(g):
-    kinds = [w for w, names in (("enchant", ("enchant armor", "enchant weapon", "protect armor")), ("map", ("magic mapping",)),
-                                ("teleport", ("teleportation",))) if any(g.scrolls.get(n) for n in names)]
+    kinds = [w for w, name in (("map", "magic mapping"), ("teleport", "teleportation")) if g.scrolls.get(name)]
     return ", ".join(kinds) if kinds else "none"
 
 
@@ -229,8 +227,6 @@ class RuleBrain:
             a = "read_teleport"
         elif "quaff_str" in valid and not awake:
             a = "quaff_str"
-        elif "read_enchant" in valid and not awake:
-            a = "read_enchant"
         elif "equip" in valid and not awake:
             a = "equip"
         elif "eat" in valid and g.hunger_word() != "fine":
@@ -271,8 +267,6 @@ class DiverBrain:
             a = "eat"
         elif not awake and "quaff_str" in valid:
             a = "quaff_str"
-        elif not awake and "read_enchant" in valid:
-            a = "read_enchant"
         elif not awake and "equip" in valid:
             a = "equip"
         elif not awake and "read_map" in valid:

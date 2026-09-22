@@ -7,6 +7,7 @@
 第 2 段階で実装していないもの (NOTES.md に一覧): 指輪・杖・未識別、巻物のうち識別系・解呪・眠り・召喚・恐怖・拘束・混乱・食料探知、
 罠、隠し扉、迷路部屋、ドラゴンの炎、ファントムの透明化、ゼロックの擬態、呪い、26 階の魔除け。
 飛び道具は本家と違って弓を「構える」必要がなく、持っていれば矢に弓の威力が乗る (装備の持ち替えという操作を省いた)。
+強化・保護の巻物は拾った時点で読む (正体が分かっていて読めば必ず得なので、判断の余地がない)。
 """
 import copy
 import random
@@ -21,7 +22,7 @@ DIRS = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
 VS_POISON, VS_MAGIC = 0, 3
 LAMP_DIST = 3
 
-ACTIONS = ["attack", "throw", "approach", "flee", "quaff_heal", "quaff_str", "read_enchant", "read_map", "read_teleport",
+ACTIONS = ["attack", "throw", "approach", "flee", "quaff_heal", "quaff_str", "read_map", "read_teleport",
            "eat", "pick_up", "equip", "explore", "descend", "rest"]
 
 
@@ -601,8 +602,6 @@ class Game:
             v.append("quaff_heal")
         if self.has_str_potion():
             v.append("quaff_str")
-        if self._enchant_scroll():
-            v.append("read_enchant")
         if self.scrolls.get("magic mapping") and not self.stairs_known():
             v.append("read_map")
         if self.scrolls.get("teleportation") and awake:
@@ -622,9 +621,6 @@ class Game:
 
     def stairs_known(self):
         return self.seen[self.stairs[1]][self.stairs[0]] or self.stairs in self.mapped
-
-    def _enchant_scroll(self):
-        return next((n for n in D.ENCHANT_SCROLLS if self.scrolls.get(n)), None)
 
     # ------------------------------------------------------------------ 飛び道具 (weapons.c の missile)
     def _throw_target(self):
@@ -764,8 +760,6 @@ class Game:
             self._throw()
         elif action == "flee":
             self._flee([m for m in mons if m["awake"]])
-        elif action == "read_enchant" and self._enchant_scroll():
-            self._read(self._enchant_scroll())
         elif action == "read_map" and self.scrolls.get("magic mapping"):
             self._read("magic mapping")
         elif action == "read_teleport" and self.scrolls.get("teleportation"):
@@ -834,6 +828,8 @@ class Game:
             elif it["kind"] == "scroll":
                 self.scrolls[it["name"]] = self.scrolls.get(it["name"], 0) + 1
                 self.say(f"巻物 ({it['name']}) を拾った")
+                if it["name"] in D.ENCHANT_SCROLLS:  # 読めば必ず得で判断の余地がないので、拾った時点で読む (未識別を入れるまでの簡略化)
+                    self._read(it["name"])
             elif it["kind"] == "missile":
                 self.missiles[it["name"]] = self.missiles.get(it["name"], 0) + it["count"]
                 self.say(f"{it['name']} を {it['count']} 拾った")

@@ -88,7 +88,7 @@ SCROLL_PROBS = [("monster confusion", 7), ("magic mapping", 4), ("hold monster",
                 ("identify ring, wand or staff", 10), ("scare monster", 3), ("food detection", 2), ("teleportation", 5),
                 ("enchant weapon", 8), ("create monster", 4), ("remove curse", 7), ("aggravate monsters", 3), ("protect armor", 2)]
 STAGE2_SCROLLS = {"enchant armor", "enchant weapon", "protect armor", "magic mapping", "teleportation"}
-ENCHANT_SCROLLS = ("enchant armor", "enchant weapon", "protect armor")   # 読めば必ず得をする巻物 (read_enchant で順に読む)
+ENCHANT_SCROLLS = ("enchant armor", "enchant weapon", "protect armor")   # 読めば必ず得をする巻物 (拾った時点で読む)
 
 # 防具 (arm_info の出現率と a_class の防御。防御は小さいほど硬い)
 ARMORS = [("leather armor", 20, 8), ("ring mail", 15, 7), ("studded leather armor", 15, 7), ("scale mail", 13, 6),
