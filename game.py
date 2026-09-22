@@ -5,7 +5,8 @@
 ここで行い、「今なにをすべきか」の判断だけを外 (Laya) に委ねる。
 
 第 2 段階で実装していないもの (NOTES.md に一覧): 指輪・杖・未識別、巻物のうち識別系・解呪・眠り・召喚・恐怖・拘束・混乱・食料探知、
-罠、隠し扉、迷路部屋、ドラゴンの炎、ファントムの透明化、ゼロックの擬態、呪い、26 階の魔除け。
+隠し扉、迷路部屋、ドラゴンの炎、ファントムの透明化、ゼロックの擬態、呪い、26 階の魔除け。
+罠は本家の 7 種 (落とし穴・熊の罠・眠りガス・矢・転移・毒ダーツ・錆び) を出現数と効果の数値ごと入れてある。踏むまで見えず、踏んだ罠は以後よける。
 飛び道具は本家と違って弓を「構える」必要がなく、持っていれば矢に弓の威力が乗る (装備の持ち替えという操作を省いた)。
 強化・保護の巻物は拾った時点で読む (正体が分かっていて読めば必ず得なので、判断の余地がない)。
 """
@@ -60,6 +61,8 @@ class Game:
         self.missiles = {"arrow": D.INIT_ARROWS[0] + self.rnd(D.INIT_ARROWS[1])}  # 投げる物: 名前 -> 本数
         self.scrolls = {}                       # 巻物: 名前 -> 枚数
         self.no_command = 0                     # 凍結・気絶で動けない残りターン
+        self.no_move = 0                        # 熊の罠で歩けない残りターン (攻撃や薬は使える)
+        self._fell = False                      # 落とし穴で階を降りた直後 (その手はモンスターが動かない)
         self.confused = 0
         self.held_by = None                     # ハエトリグサに捕まっているとき、その id
         self.vf_hit = 0
@@ -108,6 +111,7 @@ class Game:
         c.rng = random.Random(seed)
         c.seen = [row[:] for row in self.seen]  # tiles と rooms は階の途中で書き換えないので共有でよい
         c.monsters = [dict(m) for m in self.monsters]
+        c.traps = [dict(t) for t in self.traps]
         c.items = [dict(i) for i in self.items]
         c.potions = dict(self.potions)
         c.missiles, c.scrolls = dict(self.missiles), dict(self.scrolls)
@@ -128,7 +132,7 @@ class Game:
             self.won = True
             self.say(f"地下 {self.depth} 階に到達した！")
         self.no_food += 1
-        self.held_by, self.vf_hit = None, 0
+        self.held_by, self.vf_hit, self.no_move = None, 0, 0
         while True:  # どの部屋にも歩いて行ける地図ができるまで作り直す (保険。通常は 1 回で通る)
             self._build_map()
             if self._all_joined():
@@ -194,6 +198,12 @@ class Game:
                 if thing:
                     thing["x"], thing["y"] = self._floor_spot(rng.choice(real), taken)
                     self.items.append(thing)
+        self.traps = []
+        if self.rnd(10) < self.depth:
+            for _ in range(min(D.MAXTRAPS, self.rnd(self.depth // 4) + 1)):
+                kind, jp = D.TRAPS[self.rnd(len(D.TRAPS))]
+                x, y = self._floor_spot(rng.choice(real), taken)
+                self.traps.append(dict(kind=kind, jp=jp, x=x, y=y, found=False))
         self.seen = [[False] * W for _ in range(H)]
         self.mapped = set()                     # 魔法の地図で知ったマス。歩く経路と階段の位置には使えるが、探索の「見た」には数えない
         self.visible = set()
@@ -376,9 +386,10 @@ class Game:
         visible = self.visible
         awake = {(m["x"], m["y"]) for m in self.monsters if (m["x"], m["y"]) in visible and m["awake"]}
         asleep = {(m["x"], m["y"]) for m in self.monsters if (m["x"], m["y"]) in visible and not m["awake"]}
-        path = self._bfs(goal_fn, awake | asleep)
+        traps = {(t["x"], t["y"]) for t in self.traps if t["found"]}  # 踏んで分かった罠はよける
+        path = self._bfs(goal_fn, awake | asleep | traps)
         if path is None and asleep:
-            path = self._bfs(goal_fn, awake)
+            path = self._bfs(goal_fn, awake | traps)
         return path
 
     def _bfs(self, goal_fn, blocked):
@@ -496,6 +507,63 @@ class Game:
             self.say(f"レベル {new} に上がった")
         self.level = new
 
+    def _rust(self):
+        if self.armor["name"] != "leather armor" and self.armor["ac"] < 9 and not self.armor.get("protected"):
+            self.armor["ac"] += 1
+            self.say("鎧が錆びて弱くなった")
+
+    def _teleport(self):
+        real = [r for r in self.rooms if not r["gone"]]
+        taken = {(m["x"], m["y"]) for m in self.monsters} | {(self.hx, self.hy)}
+        self.hx, self.hy = self._floor_spot(self.rng.choice(real), taken)
+        self.held_by, self.vf_hit = None, 0
+        self._explore = []
+        self._look()
+
+    # ------------------------------------------------------------------ 罠 (move.c の be_trapped)
+    def _trap_at(self, x, y):
+        return next((t for t in self.traps if (t["x"], t["y"]) == (x, y)), None)
+
+    def _spring(self, t):
+        t["found"] = True
+        k = t["kind"]
+        if k == "trap door":
+            self.say("落とし穴に落ちた！")
+            self.new_floor()
+            self._fell = True
+        elif k == "bear trap":
+            self.no_move += D.BEARTIME
+            self.say("熊の罠に足を挟まれた")
+        elif k == "sleeping gas":
+            self.no_command += D.SLEEPTIME
+            self.say("白い霧に包まれて眠ってしまった")
+        elif k == "arrow trap":
+            if self._swing(self.depth - 1, self.armor["ac"], 1):
+                self.hp -= self.roll(1, 6)
+                self.say("矢が飛んできて刺さった")
+            else:
+                self.items.append(dict(kind="missile", name="arrow", count=1, x=self.hx, y=self.hy))
+                self.say("矢が飛んできたがそれた")
+        elif k == "teleport trap":
+            self.say("転移の罠を踏んだ")
+            self._teleport()
+        elif k == "dart trap":
+            if self._swing(self.depth + 1, self.armor["ac"], 1):
+                self.hp -= self.roll(1, 4)
+                if not self.save(VS_POISON) and self.str > 3:
+                    self.str -= 1
+                    self.say("毒ダーツが刺さり、力が抜けた")
+                else:
+                    self.say("毒ダーツが刺さった")
+            else:
+                self.say("ダーツが飛んできたがそれた")
+        elif k == "rust trap":
+            self.say("水が降ってきた")
+            self._rust()
+        if self.hp <= 0:
+            self.hp, self.dead, self.cause = 0, True, t["jp"]
+            self.say(f"勇者は{t['jp']}で倒れた…")
+
     def _monster_attacks(self, m):
         self.quiet = 0
         dice = [(self.vf_hit or 0, 1)] if m["ch"] == "F" else m["dice"]
@@ -511,9 +579,7 @@ class Game:
             self.say(f"{m['jp']}の攻撃！ {before - self.hp} ダメージ")
         ch = m["ch"]
         if ch == "A":
-            if self.armor["name"] != "leather armor" and self.armor["ac"] < 9 and not self.armor.get("protected"):
-                self.armor["ac"] += 1
-                self.say("鎧が錆びて弱くなった")
+            self._rust()
         elif ch == "I":
             self.no_command += self.rnd(2) + 2
             self.say("凍りついて動けない")
@@ -587,7 +653,7 @@ class Game:
             return ["rest"]
         mons = self.visible_monsters()
         adjacent = [m for m in mons if self._adjacent(m)]
-        free = self.held_by is None
+        free = self.held_by is None and self.no_move == 0
         v = []
         awake = any(m["awake"] for m in mons)
         if adjacent:
@@ -707,12 +773,7 @@ class Game:
             self._explore = []
             self.say("この階の地図が頭に浮かんだ")
         elif name == "teleportation":
-            real = [r for r in self.rooms if not r["gone"]]
-            taken = {(m["x"], m["y"]) for m in self.monsters} | {(self.hx, self.hy)}
-            self.hx, self.hy = self._floor_spot(self.rng.choice(real), taken)
-            self.held_by, self.vf_hit = None, 0
-            self._explore = []
-            self._look()
+            self._teleport()
             self.say("別の場所に飛ばされた")
 
     def _adjacent(self, m):
@@ -729,16 +790,22 @@ class Game:
             self._hero_attacks(m)
         else:
             self.hx, self.hy = step
+            t = self._trap_at(*step)
+            if t:
+                self._spring(t)
 
     def step(self, action):
         """勇者が action を実行し、続けて全モンスターが動き、空腹と自然回復が進む。"""
         self.turn += 1
         self._dist = None
+        if self.no_move > 0:
+            self.no_move -= 1
         if self.no_command > 0:
             self.no_command -= 1
         else:
-            if self._act(action):
-                return  # 階を降りた
+            if self._act(action) or self._fell:
+                self._fell = False
+                return  # 階を降りた (階段か落とし穴)
         if self.confused:
             self.confused -= 1
         self._look()

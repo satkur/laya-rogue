@@ -14,6 +14,13 @@ STOMACH_SIZE = 2000
 STARVE_TIME = 850        # 0 を割ってからこのターン数で餓死
 
 WANDER_TIME = 70         # 徘徊モンスターの出現間隔の基準 (spread = ±10%)
+
+# 罠 (rogue.h と move.c の be_trapped)。rnd(10) < 階 なら rnd(階 / 4) + 1 個 (最大 MAXTRAPS)、種類は等確率。踏むまで見えない
+TRAPS = [("trap door", "落とし穴"), ("bear trap", "熊の罠"), ("sleeping gas", "眠りガス"), ("arrow trap", "矢の罠"),
+         ("teleport trap", "転移の罠"), ("dart trap", "毒ダーツ"), ("rust trap", "錆びの罠")]
+MAXTRAPS = 10
+BEARTIME = 4             # 熊の罠で動けないターン数
+SLEEPTIME = 7            # 眠りガスで何もできないターン数
 MAX_OBJ = 9              # 1 階あたりのアイテム出現試行回数 (各 36%)
 
 # (名前, 日本語名, 持ち物確率, フラグ, 経験値, レベル, 防御, ダメージダイス)

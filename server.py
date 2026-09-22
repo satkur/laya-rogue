@@ -71,10 +71,11 @@ def frame(g, d, log_from):
                  "ac": g.armor["ac"], "weapon": g.weapon["name"], "armor": g.armor["name"], "food": g.food,
                  "hunger": g.hunger_word(), "heal": g.has_heal(), "gold": g.gold, "kills": g.kills, "depth": g.depth,
                  "missiles": sum(g.missiles.values()), "scrolls": sum(g.scrolls.values()), "bow": g.bow,
-                 "status": [w for w, on in (("混乱", g.confused), ("拘束", g.held_by is not None), ("行動不能", g.no_command)) if on]},
+                 "status": [w for w, on in (("混乱", g.confused), ("拘束", g.held_by is not None), ("足止め", g.no_move), ("行動不能", g.no_command)) if on]},
         "monsters": [{"id": m["id"], "ch": m["ch"], "x": m["x"], "y": m["y"], "hp": m["hp"], "max_hp": m["max_hp"], "awake": m["awake"]}
                      for m in g.visible_monsters()],
         "items": [{"kind": i["kind"], "x": i["x"], "y": i["y"]} for i in g.visible_items()],
+        "traps": [{"kind": t["kind"], "x": t["x"], "y": t["y"]} for t in g.traps if t["found"]],
         "seen": g.newly_seen,
         "visible": [list(p) for p in g.visible],
         "decision": d,

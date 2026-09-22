@@ -199,7 +199,7 @@ let camX = 0;
 const FONT = '"DotGothic16", "MS Gothic", monospace';
 
 let GW = 48, GH = 26, T = 20;
-let tiles = [], lit = new Set(), hero = null, heroDraw = null, monsters = new Map(), items = [], floats = [], danger = 0, shake = 0, flash = 0;
+let tiles = [], lit = new Set(), hero = null, heroDraw = null, monsters = new Map(), items = [], traps = [], floats = [], danger = 0, shake = 0, flash = 0;
 const stats = { stamps: [], ms: [] };
 const genStats = new Map();   // 世代名 -> { runs, depth, best, kills }
 let generation = null;
@@ -327,7 +327,7 @@ function onFrame(m) {
   if (m.adviser) setAdviser(m.adviser);
   for (const [x, y, t] of m.seen) tiles[y][x] = t;
   lit = new Set(m.visible.map(([x, y]) => y * GW + x));
-  items = m.items;
+  items = m.items; traps = m.traps ?? [];
 
   if (hero && m.hero.hp < hero.hp) { floats.push({ x: m.hero.x, y: m.hero.y, text: "-" + (hero.hp - m.hero.hp), c: "#d8563f", life: 0.7 }); flash = 1; }
   if (hero && m.hero.hp > hero.hp + 2) floats.push({ x: m.hero.x, y: m.hero.y, text: "+" + (m.hero.hp - hero.hp), c: "#8fbf6a", life: 0.8 });
@@ -426,6 +426,7 @@ function draw(now) {
       if (t === 2) glyph(">", x, y, isLit ? "#8fc0c4" : "#2f4a4c", isLit);
       if (t === 4) glyph("+", x, y, isLit ? "#a9834a" : "#3c3020", false);
     }
+    for (const t of traps) glyph("^", t.x, t.y, "#c46b9a", true);
     for (const it of items) glyph(ITEM[it.kind][0], it.x, it.y, ITEM[it.kind][1], true);
     for (const mo of monsters.values()) {
       mo.dx += (mo.x - mo.dx) * k; mo.dy += (mo.y - mo.dy) * k;
