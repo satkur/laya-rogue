@@ -44,17 +44,22 @@ P_CONTINUE = 0.6    # 控えておいた「階に着いた時点の状態」か�
 POOL_PER_DEPTH = 300
 
 # 何が嬉しいか。命令ごとに分けていたが、効きが弱かったのでいったん 1 本にしてある (NOTES.md)
+# 巻物の価値は「地図・転移を持っている」ことにだけ付ける。強化の巻物は読んで装備 (gear) が良くなったときに得点になる
+# (持っていること自体に点を付けると、読むと損になって読まなくなる。1 回目の学習で強化を読む率 22%、地図 1% になった失敗から)
 WANTS = dict(depth=10, level=5, kills=0.5, gold=0.01, hp=5, heal=2.5, food=3, fed=6, gear=1.5, explored=0.006, death=50,
-             missile=0.1, scroll=2.0)
+             missile=0.1, scroll=0.5)
+TACTICAL_SCROLLS = ("magic mapping", "teleportation")
 
 
 def score(g):
     w = WANTS
-    gear = (10 - g.armor["ac"]) + avg_dice(g.weapon["dice"]) + g.weapon["dplus"] + 0.5 * g.weapon["hplus"]
+    gear = ((10 - g.armor["ac"]) + (1 if g.armor.get("protected") else 0) + avg_dice(g.weapon["dice"])
+            + g.weapon["dplus"] + 0.5 * g.weapon["hplus"])
     return (w["depth"] * g.depth + w["level"] * g.level + w["kills"] * g.kills + w["gold"] * g.gold
             + w["hp"] * g.hp / g.max_hp + w["heal"] * g.has_heal() + w["food"] * min(g.food, 3)
             + w["fed"] * max(0, min(g.food_left, 1300)) / 1300 + w["gear"] * gear + 1.5 * g.str
-            + w["explored"] * g.explored + w["missile"] * min(30, sum(g.missiles.values())) + w["scroll"] * sum(g.scrolls.values())
+            + w["explored"] * g.explored + w["missile"] * min(30, sum(g.missiles.values()))
+            + w["scroll"] * sum(g.scrolls.get(n, 0) for n in TACTICAL_SCROLLS)
             + (100 if g.won else 0) - (w["death"] if g.dead else 0))
 
 
