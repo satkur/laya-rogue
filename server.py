@@ -70,6 +70,7 @@ def frame(g, d, log_from):
         "hero": {"x": g.hx, "y": g.hy, "hp": g.hp, "max_hp": g.max_hp, "level": g.level, "str": g.str, "max_str": g.max_str,
                  "ac": g.armor["ac"], "weapon": g.weapon["name"], "armor": g.armor["name"], "food": g.food,
                  "hunger": g.hunger_word(), "heal": g.has_heal(), "gold": g.gold, "kills": g.kills, "depth": g.depth,
+                 "missiles": sum(g.missiles.values()), "scrolls": sum(g.scrolls.values()), "bow": g.bow,
                  "status": [w for w, on in (("混乱", g.confused), ("拘束", g.held_by is not None), ("行動不能", g.no_command)) if on]},
         "monsters": [{"id": m["id"], "ch": m["ch"], "x": m["x"], "y": m["y"], "hp": m["hp"], "max_hp": m["max_hp"], "awake": m["awake"]}
                      for m in g.visible_monsters()],
@@ -85,7 +86,7 @@ def frame(g, d, log_from):
 @app.websocket("/ws")
 async def ws(sock: WebSocket):
     await sock.accept()
-    cfg = {"delay": 0.147, "paused": False, "step": False, "restart": False}
+    cfg = {"delay": 0.119, "paused": False, "step": False, "restart": False}
     await sock.send_json({"type": "hello", "w": W, "h": H, "generations": generations(), "generation": brain.generation,
                           "orders": [], "order": None,  # 命令はいったん外してある
                           "adviser": adviser_state()})
