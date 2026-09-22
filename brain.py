@@ -21,10 +21,14 @@ TAU = 0.3  # 経験表の評価を確率に直すときの温度。行動 1 つ�
 INSTRUCTIONS = "You are the hero of a dungeon crawl. Choose the next action."
 ACTION_DESC = {
     "attack": "Hit the adjacent enemy.",
+    "throw": "Throw a missile at the enemy in line.",
     "approach": "Move toward the nearest enemy.",
     "flee": "Move away from the enemies.",
     "quaff_heal": "Drink a healing potion.",
     "quaff_str": "Drink a strength potion.",
+    "read_enchant": "Read a scroll that improves the armor or weapon.",
+    "read_map": "Read the scroll of magic mapping.",
+    "read_teleport": "Read the scroll of teleportation.",
     "eat": "Eat food.",
     "pick_up": "Walk to the nearest item.",
     "equip": "Put on the better weapon or armor you carry.",
@@ -56,6 +60,12 @@ def count_word(n):
     return "none" if n == 0 else "one" if n == 1 else "several"
 
 
+def scroll_words(g):
+    kinds = [w for w, names in (("enchant", ("enchant armor", "enchant weapon", "protect armor")), ("map", ("magic mapping",)),
+                                ("teleport", ("teleportation",))) if any(g.scrolls.get(n) for n in names)]
+    return ", ".join(kinds) if kinds else "none"
+
+
 def depth_word(d):
     return "shallow" if d <= 4 else "middle" if d <= 9 else "deep" if d <= 14 else "abyss"
 
@@ -75,7 +85,8 @@ def describe(g, valid):
     mons = g.visible_monsters()
     items = g.visible_items()
     parts = [f"Depth: {depth_word(g.depth)}.", f"HP {hp_word(g)}.", f"Hunger: {g.hunger_word()}.",
-             f"Food: {count_word(g.food)}.", f"Healing potions: {count_word(g.has_heal())}."]
+             f"Food: {count_word(g.food)}.", f"Healing potions: {count_word(g.has_heal())}.",
+             f"Missiles: {count_word(sum(g.missiles.values()))}.", f"Scrolls: {scroll_words(g)}."]
     status = [w for w, on in (("confused", g.confused), ("held", g.held_by is not None), ("weakened", g.str < g.max_str)) if on]
     if status:
         parts.append("Status: " + ", ".join(status) + ".")
@@ -214,18 +225,26 @@ class RuleBrain:
         a = None
         if hurt and "quaff_heal" in valid:
             a = "quaff_heal"
+        elif hp == "critical" and deadly and "read_teleport" in valid:
+            a = "read_teleport"
         elif "quaff_str" in valid and not awake:
             a = "quaff_str"
+        elif "read_enchant" in valid and not awake:
+            a = "read_enchant"
         elif "equip" in valid and not awake:
             a = "equip"
         elif "eat" in valid and g.hunger_word() != "fine":
             a = "eat"
         elif "attack" in valid and any((m["awake"] or "M" in m["flags"]) and g._adjacent(m) for m in mons):
             a = "flee" if hp == "critical" and "flee" in valid and "quaff_heal" not in valid and deadly else "attack"
+        elif "throw" in valid:
+            a = "throw"
         elif awake and (hurt or deadly) and "flee" in valid:
             a = "flee"
         elif "approach" in valid and awake:
             a = "approach"
+        elif "read_map" in valid and "explore" not in valid:
+            a = "read_map"
         elif not awake and hp in ("wounded", "low", "critical") and g.hunger_word() == "fine":
             a = "rest"
         if a is None:
@@ -246,14 +265,22 @@ class DiverBrain:
         hurt = hp in ("low", "critical")
         if hurt and "quaff_heal" in valid:
             a = "quaff_heal"
+        elif hp == "critical" and "read_teleport" in valid and any(threat_word(g, m) == "deadly" for m in awake):
+            a = "read_teleport"
         elif "eat" in valid and g.hunger_word() != "fine":
             a = "eat"
         elif not awake and "quaff_str" in valid:
             a = "quaff_str"
+        elif not awake and "read_enchant" in valid:
+            a = "read_enchant"
         elif not awake and "equip" in valid:
             a = "equip"
+        elif not awake and "read_map" in valid:
+            a = "read_map"
         elif "attack" in valid:
             a = "attack"
+        elif "throw" in valid:
+            a = "throw"
         elif awake and "descend" in valid and not hurt:
             a = "descend"
         elif awake and "approach" in valid:

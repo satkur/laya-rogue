@@ -55,6 +55,7 @@
   .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0 10px; }
   .cell { display: flex; flex-direction: column-reverse; padding: 2px 0; border-top: 1px dotted var(--faint); }
   .cell .v { color: var(--accent); font-size: 20px; line-height: 1.2; }
+  .cell .v.small { font-size: 13px; line-height: 1.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cell .k { color: var(--dim); font-size: 14px; }
 
   #state { color: #a3987a; min-height: 46px; margin-bottom: 6px; }
@@ -139,6 +140,10 @@
         <div class="cell"><div class="v" id="turn">0</div><div class="k">ターン</div></div>
         <div class="cell"><div class="v" id="score">0</div><div class="k">SCORE</div></div>
         <div class="cell"><div class="v" id="hiscore">0</div><div class="k">HI-SCORE</div></div>
+        <div class="cell"><div class="v small" id="weapon">–</div><div class="k">武器</div></div>
+        <div class="cell"><div class="v small" id="armor">–</div><div class="k">防具</div></div>
+        <div class="cell"><div class="v" id="missiles">0</div><div class="k">飛び道具</div></div>
+        <div class="cell"><div class="v" id="scrolls">0</div><div class="k">巻物</div></div>
       </div>
     </fieldset>
     <fieldset>
@@ -174,15 +179,20 @@
 
 <script>
 const $ = id => document.getElementById(id);
-const JP = { attack: "攻撃", approach: "接近", flee: "逃走", quaff_heal: "回復薬", quaff_str: "力の薬", eat: "食事", pick_up: "回収",
+const JP = { attack: "攻撃", throw: "投擲", approach: "接近", flee: "逃走", quaff_heal: "回復薬", quaff_str: "力の薬",
+             read_enchant: "強化の巻物", read_map: "地図の巻物", read_teleport: "転移の巻物", eat: "食事", pick_up: "回収",
              equip: "装備", explore: "探索", descend: "階段へ", rest: "待機" };
 const HUNGER_JP = { fine: "十分", hungry: "空腹", weak: "衰弱", fainting: "飢餓" };
+const WEAPON_JP = { mace: "メイス", "long sword": "長剣", "two handed sword": "両手剣", spear: "槍", dagger: "短剣" };
+const ARMOR_JP = { "leather armor": "革鎧", "ring mail": "鎖帷子", "studded leather armor": "鋲革鎧", "scale mail": "鱗鎧",
+                   "chain mail": "鎖鎧", "splint mail": "板金鎖鎧", "banded mail": "帯金鎧", "plate mail": "板金鎧" };
 const ORDER = Object.keys(JP);
 const ORDER_JP = { cautious: "慎重に", aggressive: "攻めろ", loot: "漁れ", descend: "降りろ" };
 const scoreOf = h => h.depth * 100 + h.level * 20 + h.gold;
 let order = null, hiscore = 0;
 try { hiscore = +localStorage.getItem("laya-rogue-hiscore") || 0; } catch {}
-const ITEM = { gold: ["*", "#e2c25c"], food: [":", "#c9a87a"], potion: ["!", "#b184c4"], weapon: [")", "#a9b4bd"], armor: ["]", "#a9b4bd"] };
+const ITEM = { gold: ["*", "#e2c25c"], food: [":", "#c9a87a"], potion: ["!", "#b184c4"], weapon: [")", "#a9b4bd"], armor: ["]", "#a9b4bd"],
+               scroll: ["?", "#d9d4a8"], missile: [")", "#a9b4bd"], bow: [")", "#a9b4bd"] };
 const monsterColor = mo => mo.awake ? "#c85a44" : "#8d8a72";   // 眠っている相手はくすんだ色、襲ってくる相手は赤
 const VIEW_W = 50;                                                // 横 80 マスのうち、勇者を中心にこの幅だけ映す
 let camX = 0;
@@ -358,6 +368,8 @@ setInterval(() => {                       // パネルは 10Hz。毎フレーム
   $("hunger").textContent = HUNGER_JP[h.hunger] ?? h.hunger; $("food").textContent = h.food;
   $("hunger").style.color = h.hunger === "fine" ? "" : "var(--bad)";
   $("gold").textContent = h.gold; $("kills").textContent = h.kills; $("turn").textContent = m.turn;
+  $("weapon").textContent = WEAPON_JP[h.weapon] ?? h.weapon; $("armor").textContent = ARMOR_JP[h.armor] ?? h.armor;
+  $("missiles").textContent = h.missiles + (h.bow ? "" : " (弓なし)"); $("scrolls").textContent = h.scrolls;
   const sc = scoreOf(h);
   if (sc > hiscore) { hiscore = sc; try { localStorage.setItem("laya-rogue-hiscore", hiscore); } catch {} }
   $("score").textContent = sc; $("hiscore").textContent = hiscore;

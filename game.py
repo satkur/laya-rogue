@@ -1,11 +1,12 @@
-"""本家 Rogue 5.4.4 のルールに基づくターン制ローグライク (第 1 段階: 戦闘と生存)。描画も AI も持たない。
+"""本家 Rogue 5.4.4 のルールに基づくターン制ローグライク (第 2 段階: 戦闘と生存 + 巻物と飛び道具)。描画も AI も持たない。
 
 数値と規則は Rogue 5.4.4 を参照した独自実装 (rogue_data.py と THIRD_PARTY_NOTICES.md)。
 勇者の 1 ターンは「高レベル行動」(ACTIONS) を 1 つ選ぶこと。どのマスへ動くかといった幾何の計算は
 ここで行い、「今なにをすべきか」の判断だけを外 (Laya) に委ねる。
 
-第 1 段階で実装していないもの (NOTES.md に一覧): 巻物・指輪・杖・未識別、飛び道具、罠、隠し扉、迷路部屋、
-ドラゴンの炎、ファントムの透明化、ゼロックの擬態、呪い、26 階の魔除け。
+第 2 段階で実装していないもの (NOTES.md に一覧): 指輪・杖・未識別、巻物のうち識別系・解呪・眠り・召喚・恐怖・拘束・混乱・食料探知、
+罠、隠し扉、迷路部屋、ドラゴンの炎、ファントムの透明化、ゼロックの擬態、呪い、26 階の魔除け。
+飛び道具は本家と違って弓を「構える」必要がなく、持っていれば矢に弓の威力が乗る (装備の持ち替えという操作を省いた)。
 """
 import copy
 import random
@@ -20,7 +21,8 @@ DIRS = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
 VS_POISON, VS_MAGIC = 0, 3
 LAMP_DIST = 3
 
-ACTIONS = ["attack", "approach", "flee", "quaff_heal", "quaff_str", "eat", "pick_up", "equip", "explore", "descend", "rest"]
+ACTIONS = ["attack", "throw", "approach", "flee", "quaff_heal", "quaff_str", "read_enchant", "read_map", "read_teleport",
+           "eat", "pick_up", "equip", "explore", "descend", "rest"]
 
 
 def parse_dice(s):
@@ -32,7 +34,7 @@ def avg_dice(dice):
 
 
 HERO_FIELDS = ("kills", "gold", "level", "exp", "str", "max_str", "hp", "max_hp", "food_left", "food", "potions",
-               "weapon", "armor", "gear", "no_food")
+               "weapon", "armor", "gear", "no_food", "missiles", "scrolls", "bow")
 
 
 class Game:
@@ -53,6 +55,9 @@ class Game:
         self.weapon = dict(name=name, dice=parse_dice(dmg), hplus=hplus, dplus=dplus)
         self.armor = dict(name=D.INIT_ARMOR[0], ac=D.INIT_ARMOR[1])
         self.gear = []                          # 拾ったが装備していない武器・防具
+        self.bow = True                         # 弓を持っているか (初期装備)。持っていれば矢に弓の威力が乗る
+        self.missiles = {"arrow": D.INIT_ARROWS[0] + self.rnd(D.INIT_ARROWS[1])}  # 投げる物: 名前 -> 本数
+        self.scrolls = {}                       # 巻物: 名前 -> 枚数
         self.no_command = 0                     # 凍結・気絶で動けない残りターン
         self.confused = 0
         self.held_by = None                     # ハエトリグサに捕まっているとき、その id
@@ -104,6 +109,7 @@ class Game:
         c.monsters = [dict(m) for m in self.monsters]
         c.items = [dict(i) for i in self.items]
         c.potions = dict(self.potions)
+        c.missiles, c.scrolls = dict(self.missiles), dict(self.scrolls)
         c.weapon, c.armor = dict(self.weapon), dict(self.armor)
         c.gear = [dict(x) for x in self.gear]
         c.visible = set(self.visible)
@@ -188,6 +194,7 @@ class Game:
                     thing["x"], thing["y"] = self._floor_spot(rng.choice(real), taken)
                     self.items.append(thing)
         self.seen = [[False] * W for _ in range(H)]
+        self.mapped = set()                     # 魔法の地図で知ったマス。歩く経路と階段の位置には使えるが、探索の「見た」には数えない
         self.visible = set()
         self.newly_seen = []
         self._dist = None
@@ -292,7 +299,7 @@ class Game:
                 return entry
 
     def _new_thing(self):
-        """本家の出現比率で 1 つ引く。第 1 段階で未実装の種類を引いたら何も出ない (= 本家より物資が少ない)。"""
+        """本家の出現比率で 1 つ引く。未実装の種類を引いたら何も出ない (= 本家より物資が少ない)。"""
         kind = "food" if self.no_food > 3 else self._pick(D.THING_PROBS)[0]
         if kind == "food":
             self.no_food = 0
@@ -300,10 +307,15 @@ class Game:
         if kind == "potion":
             name = self._pick(D.POTION_PROBS)[0]
             return dict(kind="potion", name=name) if name in D.STAGE1_POTIONS else None
+        if kind == "scroll":
+            name = self._pick(D.SCROLL_PROBS)[0]
+            return dict(kind="scroll", name=name) if name in D.STAGE2_SCROLLS else None
         if kind == "weapon":
-            name, _, dmg = self._pick(D.WEAPONS)
-            if dmg is None:
-                return None
+            name, _, dmg, hurl, launcher = self._pick(D.WEAPONS)
+            if name == "short bow":
+                return dict(kind="bow", name=name)
+            if name in D.MISSILES:
+                return dict(kind="missile", name=name, count=self.rnd(8) + 8 if name in D.STACKED else 1)
             r = self.rnd(100)
             hplus = -(self.rnd(3) + 1) if r < 10 else self.rnd(3) + 1 if r < 15 else 0
             return dict(kind="weapon", name=name, dice=parse_dice(dmg), hplus=hplus, dplus=0)
@@ -369,7 +381,7 @@ class Game:
         return path
 
     def _bfs(self, goal_fn, blocked):
-        seen, nbr = self.seen, self._nbr
+        seen, nbr, mapped = self.seen, self._nbr, self.mapped
         start = (self.hx, self.hy)
         prev = {start: None}
         q = deque([start])
@@ -382,7 +394,7 @@ class Game:
                     cur = prev[cur]
                 return path[::-1]
             for n in nbr[cur]:
-                if n not in prev and seen[n[1]][n[0]] and (n not in blocked or goal_fn(n)):
+                if n not in prev and (seen[n[1]][n[0]] or n in mapped) and (n not in blocked or goal_fn(n)):
                     prev[n] = cur
                     q.append(n)
         return None
@@ -453,6 +465,9 @@ class Game:
         if m["hp"] > 0:
             self.say(f"{m['jp']}に攻撃が{'当たった' if hit else '外れた'}")
             return
+        self._kill(m)
+
+    def _kill(self, m):
         self.monsters.remove(m)
         self.kills += 1
         self.say(f"{m['jp']}を倒した")
@@ -495,7 +510,7 @@ class Game:
             self.say(f"{m['jp']}の攻撃！ {before - self.hp} ダメージ")
         ch = m["ch"]
         if ch == "A":
-            if self.armor["name"] != "leather armor" and self.armor["ac"] < 9:
+            if self.armor["name"] != "leather armor" and self.armor["ac"] < 9 and not self.armor.get("protected"):
                 self.armor["ac"] += 1
                 self.say("鎧が錆びて弱くなった")
         elif ch == "I":
@@ -573,16 +588,25 @@ class Game:
         adjacent = [m for m in mons if self._adjacent(m)]
         free = self.held_by is None
         v = []
+        awake = any(m["awake"] for m in mons)
         if adjacent:
             v.append("attack")
+        if self.missiles and self._throw_target():
+            v.append("throw")
         if free and mons and not adjacent and self._step_toward((mons[0]["x"], mons[0]["y"])):
             v.append("approach")
-        if free and any(m["awake"] for m in mons):
+        if free and awake:
             v.append("flee")
         if self.has_heal() and self.hp < self.max_hp:
             v.append("quaff_heal")
         if self.has_str_potion():
             v.append("quaff_str")
+        if self._enchant_scroll():
+            v.append("read_enchant")
+        if self.scrolls.get("magic mapping") and not self.stairs_known():
+            v.append("read_map")
+        if self.scrolls.get("teleportation") and awake:
+            v.append("read_teleport")
         if self.food and self.food_left < 1000:
             v.append("eat")
         if free and self.visible_items():
@@ -591,10 +615,109 @@ class Game:
             v.append("equip")
         if free and self._explore_step():
             v.append("explore")
-        if free and self.seen[self.stairs[1]][self.stairs[0]]:
+        if free and self.stairs_known():
             v.append("descend")
         v.append("rest")
         return v
+
+    def stairs_known(self):
+        return self.seen[self.stairs[1]][self.stairs[0]] or self.stairs in self.mapped
+
+    def _enchant_scroll(self):
+        return next((n for n in D.ENCHANT_SCROLLS if self.scrolls.get(n)), None)
+
+    # ------------------------------------------------------------------ 飛び道具 (weapons.c の missile)
+    def _throw_target(self):
+        """8 方向のどれかに、起きている見えている敵が直線上にいれば (間に何もない、距離 2 以上)、いちばん近いものを返す。"""
+        best = None
+        for dx, dy in DIRS:
+            x, y = self.hx, self.hy
+            while True:
+                nx, ny = x + dx, y + dy
+                if not self._step_ok(x, y, nx, ny):
+                    break
+                m = self._monster_at(nx, ny)
+                if m:
+                    d = self.dist(nx, ny)
+                    if m["awake"] and (nx, ny) in self.visible and d >= 2 and (best is None or d < best[1]):
+                        best = (m, d, (x, y))
+                    break
+                x, y = nx, ny
+        return best
+
+    def _throw(self):
+        target = self._throw_target()
+        if not target:
+            return
+        m, _, landing = target
+        name = max(self.missiles, key=lambda n: avg_dice(parse_dice(self._hurl_dice(n))))
+        self.missiles[name] -= 1
+        if self.missiles[name] <= 0:
+            del self.missiles[name]
+        hplus = D.STR_PLUS[self.str] + (0 if m["awake"] else 4)
+        m["awake"] = True
+        if self._swing(self.level, m["arm"], hplus):
+            dmg = max(0, self.roll(*parse_dice(self._hurl_dice(name))[0]) + D.ADD_DAM[self.str])
+            m["hp"] -= dmg
+            self.say(f"{name} が{m['jp']}に当たった")
+            if m["hp"] <= 0:
+                self._kill(m)
+        else:
+            self.say(f"{name} は{m['jp']}に外れた")
+        # 投げた物は敵の手前のマスに落ちる (拾い直せる)
+        for it in self.items:
+            if it["kind"] == "missile" and it["name"] == name and (it["x"], it["y"]) == landing:
+                it["count"] += 1
+                break
+        else:
+            self.items.append(dict(kind="missile", name=name, count=1, x=landing[0], y=landing[1]))
+
+    def _hurl_dice(self, name):
+        """投げたときのダメージダイス。矢は弓を持っていてこそ (持っていなければ振り回しの 1x1)。"""
+        for n, _, dmg, hurl, launcher in D.WEAPONS:
+            if n == name:
+                return hurl if launcher is None or self.bow else dmg
+        return "1x1"
+
+    def missile_damage_per_turn(self, m):
+        if not self.missiles:
+            return 0.0
+        best = max(avg_dice(parse_dice(self._hurl_dice(n))) for n in self.missiles)
+        return self.hit_chance(self.level, m["arm"], D.STR_PLUS[self.str]) * max(0.0, best + D.ADD_DAM[self.str])
+
+    # ------------------------------------------------------------------ 巻物 (scrolls.c)
+    def _read(self, name):
+        self.scrolls[name] -= 1
+        if self.scrolls[name] <= 0:
+            del self.scrolls[name]
+        if name == "enchant armor":
+            self.armor["ac"] -= 1
+            self.say("鎧が輝いた (強化)")
+        elif name == "enchant weapon":
+            if self.rnd(2) == 0:
+                self.weapon["hplus"] += 1
+            else:
+                self.weapon["dplus"] += 1
+            self.say(f"{self.weapon['name']} が輝いた (強化)")
+        elif name == "protect armor":
+            self.armor["protected"] = True
+            self.say("鎧が錆びなくなった")
+        elif name == "magic mapping":
+            for y in range(H):
+                for x in range(W):
+                    if self.tiles[y][x] != ROCK and not self.seen[y][x] and (x, y) not in self.mapped:
+                        self.mapped.add((x, y))
+                        self.newly_seen.append((x, y, self.tiles[y][x]))
+            self._explore = []
+            self.say("この階の地図が頭に浮かんだ")
+        elif name == "teleportation":
+            real = [r for r in self.rooms if not r["gone"]]
+            taken = {(m["x"], m["y"]) for m in self.monsters} | {(self.hx, self.hy)}
+            self.hx, self.hy = self._floor_spot(self.rng.choice(real), taken)
+            self.held_by, self.vf_hit = None, 0
+            self._explore = []
+            self._look()
+            self.say("別の場所に飛ばされた")
 
     def _adjacent(self, m):
         return (m["x"], m["y"]) in self._nbr[(self.hx, self.hy)]
@@ -637,8 +760,16 @@ class Game:
                 self._hero_attacks(min(adj, key=lambda m: m["hp"]))
         elif action == "approach" and mons:
             self._move_to(self._step_toward((mons[0]["x"], mons[0]["y"])))
+        elif action == "throw":
+            self._throw()
         elif action == "flee":
             self._flee([m for m in mons if m["awake"]])
+        elif action == "read_enchant" and self._enchant_scroll():
+            self._read(self._enchant_scroll())
+        elif action == "read_map" and self.scrolls.get("magic mapping"):
+            self._read("magic mapping")
+        elif action == "read_teleport" and self.scrolls.get("teleportation"):
+            self._read("teleportation")
         elif action == "quaff_heal" and self.has_heal():
             # 体力が大きく減っていれば強い薬から、少しなら弱い薬から
             order = ["extra healing", "healing"] if self.hp <= self.max_hp // 2 else ["healing", "extra healing"]
@@ -700,6 +831,15 @@ class Game:
             elif it["kind"] == "potion":
                 self.potions[it["name"]] = self.potions.get(it["name"], 0) + 1
                 self.say(f"薬 ({it['name']}) を拾った")
+            elif it["kind"] == "scroll":
+                self.scrolls[it["name"]] = self.scrolls.get(it["name"], 0) + 1
+                self.say(f"巻物 ({it['name']}) を拾った")
+            elif it["kind"] == "missile":
+                self.missiles[it["name"]] = self.missiles.get(it["name"], 0) + it["count"]
+                self.say(f"{it['name']} を {it['count']} 拾った")
+            elif it["kind"] == "bow":
+                self.bow = True
+                self.say("弓を拾った")
             else:
                 self.gear.append(it)
                 self.say(f"{it['name']} を拾った")

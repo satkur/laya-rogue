@@ -41,6 +41,7 @@ COOLDOWN = 300        # 失敗が 3 回続いたら、このターン数は呼�
 
 PLANS = ["explore_fully", "descend_asap", "free"]
 TACTICS = ["fight", "flee", "escape", "free"]
+READS = ["none", "map", "teleport"]
 SCHEMA = {
     "type": "object",
     "properties": {
@@ -48,9 +49,10 @@ SCHEMA = {
         "rest": {"type": "boolean"},
         "tactic": {"type": "string", "enum": TACTICS},
         "heal_now": {"type": "boolean"},
+        "read_now": {"type": "string", "enum": READS},
         "reason": {"type": "string"},
     },
-    "required": ["plan", "rest", "tactic", "heal_now", "reason"],
+    "required": ["plan", "rest", "tactic", "heal_now", "read_now", "reason"],
     "additionalProperties": False,
 }
 
@@ -59,7 +61,9 @@ A small, fast model ("the pilot", trained by 20,000 games of self-play) picks th
 You are consulted at milestones (new level), when HP or hunger worsens, when a non-trivial monster wakes up in view, when the hero seems stuck, and periodically while a constraint is in force. Each consultation costs several seconds of real time, nothing in game time.
 
 Rules of this game (subset of Rogue 5.4.4):
-- Monsters get stronger with depth. The hero gets stronger only by experience levels (killing monsters), better weapons/armor found on the floor, and strength potions. There are no scrolls, wands, rings or missiles in this version.
+- Monsters get stronger with depth. The hero gets stronger by experience levels (killing monsters), better weapons/armor found on the floor, strength potions, and scrolls of enchant armor / enchant weapon / protect armor (the pilot reads those as soon as it can; they are always good). There are no wands or rings, and every item is identified.
+- Scrolls the strategist can trigger: magic mapping (reveals the whole level including the stairs; useful when the stairs are unknown and the hero needs an exit or is hungry) and teleportation (moves the hero to a random spot on the level, breaking contact with every monster; the one reliable escape when the stairs are unknown).
+- Missiles: the hero starts with a bow and about 30 arrows and may find darts, shuriken, daggers and spears. "throw" is available when an awake monster is in view on a straight line at distance 2 or more; the missile lands next to the target and can be picked up again. Shooting an approaching monster gets 1-3 hits in before melee.
 - HP regenerates slowly (about 1 HP per 10-20 turns at low level, faster later). Resting with no enemy around is the main way to heal. Healing potions are scarce.
 - Hunger: one ration lasts about 1300 turns; "hungry" -> "weak" -> "fainting" -> starvation. Food lies on the floor of unexplored areas; each new level is a fresh chance to find some.
 - Monsters and the hero move at the same speed. On its turn a monster either attacks (if it is already adjacent) or moves one step toward the hero, never both. So stepping away avoids that turn's attack, but the monster follows and the hero gains nothing unless there is somewhere to go (the stairs) or time to regenerate (about 1 HP per 10-20 turns at low level). Fleeing into a dead end or a corner means being hit again. Taking the stairs always works: monsters never follow.
@@ -70,6 +74,7 @@ Your outputs:
 - rest: true = when no awake enemy is in view, only rest (or eat / drink / equip) until HP is at least 90%. Ignored while hungry-weak or worse.
 - tactic (only matters while an awake enemy is in view, and resets to "free" when no awake enemy is in view): "fight" = running away on foot is removed; attacking, the stairs and potions stay. "flee" = attacking and approaching are removed (only useful to reach the stairs or to stall a slow/held situation). "escape" = if the stairs are known, walk to them and go down now, ignoring the monster; if they are not known it behaves like "flee". "free" = no constraint. The stairs are never removed by a tactic.
 - heal_now: true = drink a healing potion on the next turn if the hero carries one.
+- read_now: "map" = read magic mapping on the next turn (if carried and the stairs are unknown); "teleport" = read teleportation on the next turn (if carried and an enemy is awake in view); "none" = nothing. One-shot.
 - reason: one short sentence in Japanese, shown to the player.
 
 Briefing: what was measured in this version (hundreds of games with the same pilot). Use it to calibrate, then decide for yourself.
@@ -80,7 +85,8 @@ Briefing: what was measured in this version (hundreds of games with the same pil
 - Measured on this pilot over the same 16 seeds: pilot alone 9.4; "rest"=true whenever HP < 60% and no enemy in view 10.0; an older, stronger form of "fight" (which also removed resting and the stairs) forced whenever HP <= 50% with an enemy in view 8.8; both together 7.0. Forcing "flee" at critical HP scored worse than doing nothing. Forcing "escape" against every deadly monster changed nothing on average, because in 9 of 10 such fights the stairs were not known yet. A previous strategist that answered "fight" at nearly every low-HP consultation scored 6.7 against 10.3 for the pilot alone. The pilot's own choice inside a fight is as good as any rule; use "fight"/"flee"/"escape" only when the situation has a feature the pilot cannot see (a known exit, a special attack worth avoiding, a fight that is hopeless by the numbers).
 - A strategist that used "explore_fully" and "fight" liberally scored 4.5; one that left everything free scored about the same as the pilot alone. Every constraint replaces the pilot's judgement, so set one only when you can say why the pilot's default would be wrong here.
 - Starting armor two points better adds about 2.4 levels of depth. Better armor found on the floor is the most valuable thing in the game; aquators (rust) are its main enemy.
-Default to plan="free", rest=false, tactic="free", heal_now=false and deviate with a concrete reason: for example "escape" when a deadly monster is awake, the stairs are known and the hero is not fresh; "rest"=true after a hard fight before pushing deeper; "heal_now" when critical in a fight that is otherwise winnable; "descend_asap" when hungry with no food; "flee"/"escape" from an aquator to protect good armor."""
+Note: scrolls and missiles were added after the measurements above; the pilot was retrained with them, and their effect on the strategist's levers is not measured yet.
+Default to plan="free", rest=false, tactic="free", heal_now=false, read_now="none" and deviate with a concrete reason: for example "escape" when a deadly monster is awake, the stairs are known and the hero is not fresh; "rest"=true after a hard fight before pushing deeper; "heal_now" when critical in a fight that is otherwise winnable; "descend_asap" when hungry with no food; "flee"/"escape" from an aquator to protect good armor."""
 
 
 def situation(g, trigger, st):
@@ -95,6 +101,8 @@ def situation(g, trigger, st):
         f"weapon {g.weapon['name']}.",
         f"Hunger: {g.hunger_word()} (about {max(0, g.food_left)} turns of food in stomach). Food rations carried: {g.food}. "
         f"Healing potions: {g.has_heal()}. Gold {g.gold}. Kills {g.kills}.",
+        f"Missiles: {sum(g.missiles.values())} ({', '.join(f'{n} x{c}' for n, c in g.missiles.items()) or 'none'}), bow: {'yes' if g.bow else 'no'}. "
+        f"Scrolls: {', '.join(f'{n} x{c}' for n, c in g.scrolls.items()) or 'none'}.",
         "Status: " + (", ".join(w for w, on in (("confused", g.confused), ("held", g.held_by is not None), ("cannot act", g.no_command > 0)) if on) or "normal") + ".",
     ]
     if mons:
@@ -133,7 +141,7 @@ def ask(text, model="opus", effort="high"):
     if out.get("is_error"):
         raise RuntimeError(str(out.get("result", ""))[:200])
     d = out.get("structured_output")
-    if not isinstance(d, dict) or d.get("plan") not in PLANS or d.get("tactic") not in TACTICS:
+    if not isinstance(d, dict) or d.get("plan") not in PLANS or d.get("tactic") not in TACTICS or d.get("read_now", "none") not in READS:
         raise RuntimeError("想定外の応答: " + p.stdout[:300])
     u = out.get("usage", {})
     tokens = sum(u.get(k, 0) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"))
@@ -157,6 +165,7 @@ class Strategist:
 
     def reset(self):
         self.plan, self.rest, self.tactic, self.heal_now, self.reason = "free", False, "free", False, ""
+        self.read_now = "none"
         self.paused_until, self.pauses = -1, 0
         self.depth = 0
         self.floor_turn = self.last_turn = 0
@@ -226,6 +235,7 @@ class Strategist:
         self.seconds += sec
         self.tokens += tokens
         self.plan, self.rest, self.tactic, self.heal_now, self.reason = d["plan"], d["rest"], d["tactic"], d["heal_now"], d["reason"]
+        self.read_now = d.get("read_now", "none")
         self.history.append({"turn": g.turn, "depth": g.depth, "hp": g.hp, "max_hp": g.max_hp, "level": g.level, "kind": self.kind,
                              "trigger": trigger, **d, "sec": round(sec, 1), "valid": g.valid_actions(), "recent": self.recent[-12:]})
         return {"trigger": trigger, "kind": self.kind, **d, "sec": round(sec, 1), "tokens": tokens, "calls": self.calls}
@@ -238,6 +248,10 @@ class Strategist:
             self.heal_now = False
             if "quaff_heal" in valid:
                 return ["quaff_heal"]
+        if self.read_now != "none":
+            action, self.read_now = f"read_{self.read_now}", "none"
+            if action in valid:
+                return [action]
         awake = any(m["awake"] for m in g.visible_monsters())
         drop = set()
         if awake:

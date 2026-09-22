@@ -44,7 +44,8 @@ P_CONTINUE = 0.6    # 控えておいた「階に着いた時点の状態」か�
 POOL_PER_DEPTH = 300
 
 # 何が嬉しいか。命令ごとに分けていたが、効きが弱かったのでいったん 1 本にしてある (NOTES.md)
-WANTS = dict(depth=10, level=5, kills=0.5, gold=0.01, hp=5, heal=2.5, food=3, fed=6, gear=1.5, explored=0.006, death=50)
+WANTS = dict(depth=10, level=5, kills=0.5, gold=0.01, hp=5, heal=2.5, food=3, fed=6, gear=1.5, explored=0.006, death=50,
+             missile=0.1, scroll=2.0)
 
 
 def score(g):
@@ -53,7 +54,8 @@ def score(g):
     return (w["depth"] * g.depth + w["level"] * g.level + w["kills"] * g.kills + w["gold"] * g.gold
             + w["hp"] * g.hp / g.max_hp + w["heal"] * g.has_heal() + w["food"] * min(g.food, 3)
             + w["fed"] * max(0, min(g.food_left, 1300)) / 1300 + w["gear"] * gear + 1.5 * g.str
-            + w["explored"] * g.explored + (100 if g.won else 0) - (w["death"] if g.dead else 0))
+            + w["explored"] * g.explored + w["missile"] * min(30, sum(g.missiles.values())) + w["scroll"] * sum(g.scrolls.values())
+            + (100 if g.won else 0) - (w["death"] if g.dead else 0))
 
 
 TEXTS_PER_KEY = 24  # 粗いキー 1 つにつき、Laya の教材として控えておく状況文の数

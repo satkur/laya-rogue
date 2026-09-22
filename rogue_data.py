@@ -1,4 +1,4 @@
-# Data tables derived from Rogue 5.4.4 (monsters, experience levels, strength bonuses, hunger, items).
+# Data tables derived from Rogue 5.4.4 (monsters, experience levels, strength bonuses, hunger, items, scrolls, missiles).
 # Copyright (C) 1980-1983, 1985, 1999 Michael Toy, Ken Arnold and Glenn Wichman.
 # Used under the BSD 3-Clause license; see THIRD_PARTY_NOTICES.md.
 # Python implementation (c) 2026 satkur, MIT.
@@ -73,10 +73,22 @@ POTION_PROBS = [("confusion", 7), ("hallucination", 8), ("poison", 8), ("gain st
                 ("extra healing", 5), ("haste self", 5), ("restore strength", 13), ("blindness", 5), ("levitation", 6)]
 STAGE1_POTIONS = {"healing", "extra healing", "gain strength", "restore strength"}
 
-# 武器 (weap_info の出現率と weapons.c の振り回しダメージ)。第 1 段階は近接武器だけ
-WEAPONS = [("mace", 11, "2x4"), ("long sword", 11, "3x4"), ("short bow", 12, None), ("arrow", 12, None),
-           ("dagger", 8, "1x6"), ("two handed sword", 10, "4x4"), ("dart", 12, None), ("shuriken", 12, None),
-           ("spear", 12, "2x3")]
+# 武器 (weap_info の出現率と weapons.c のダメージ): (名前, 出現率, 振り回し, 投げたとき, 射出する武器)
+WEAPONS = [("mace", 11, "2x4", "1x3", None), ("long sword", 11, "3x4", "1x2", None), ("short bow", 12, "1x1", "1x1", None),
+           ("arrow", 12, "1x1", "2x3", "short bow"), ("dagger", 8, "1x6", "1x4", None), ("two handed sword", 10, "4x4", "1x2", None),
+           ("dart", 12, "1x1", "1x3", None), ("shuriken", 12, "1x2", "2x4", None), ("spear", 12, "2x3", "1x6", None)]
+MISSILES = {"arrow", "dart", "shuriken", "dagger", "spear"}   # 投げる物として扱う (振り回しでは初期装備の mace に劣る)
+STACKED = {"arrow", "dart", "shuriken"}                        # まとまって落ちている (rnd(8) + 8 本)
+INIT_ARROWS = (25, 15)                                        # 初期装備の矢: 25 + rnd(15) 本 (init.c)。弓も持って始まる
+
+# 巻物 (scr_info の出現率)。第 2 段階は未識別の仕組みがないので、読んで意味のある ★ の 5 種だけ出る
+# (識別系 43、解呪 7 は効果の対象がまだ無い。眠り・怪物召喚・怪物寄せ・混乱・拘束・恐怖・食料探知は未実装)
+SCROLL_PROBS = [("monster confusion", 7), ("magic mapping", 4), ("hold monster", 2), ("sleep", 3), ("enchant armor", 7),
+                ("identify potion", 10), ("identify scroll", 10), ("identify weapon", 6), ("identify armor", 7),
+                ("identify ring, wand or staff", 10), ("scare monster", 3), ("food detection", 2), ("teleportation", 5),
+                ("enchant weapon", 8), ("create monster", 4), ("remove curse", 7), ("aggravate monsters", 3), ("protect armor", 2)]
+STAGE2_SCROLLS = {"enchant armor", "enchant weapon", "protect armor", "magic mapping", "teleportation"}
+ENCHANT_SCROLLS = ("enchant armor", "enchant weapon", "protect armor")   # 読めば必ず得をする巻物 (read_enchant で順に読む)
 
 # 防具 (arm_info の出現率と a_class の防御。防御は小さいほど硬い)
 ARMORS = [("leather armor", 20, 8), ("ring mail", 15, 7), ("studded leather armor", 15, 7), ("scale mail", 13, 6),
