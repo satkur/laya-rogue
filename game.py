@@ -125,6 +125,7 @@ class Game:
         c.log = []
         c._dist = None
         c._explore = list(self._explore)
+        c._search_path = list(self._search_path)
         return c
 
     # ------------------------------------------------------------------ 階の生成 (3×3 の区画に部屋、全域木 + 余分な通路)
@@ -224,6 +225,8 @@ class Game:
                      for c in cells}
         self._nb8 = {c: tuple((c[0] + dx, c[1] + dy) for dx, dy in DIRS if 0 <= c[0] + dx < W and 0 <= c[1] + dy < H)
                      for c in cells}
+        self._wall_spots = self._find_wall_spots()
+        self._search_path = []
         self._look()
         if not self.won:
             self.say(f"地下 {self.depth} 階")
@@ -450,41 +453,61 @@ class Game:
                     self._nb8[(cx, cy)] = tuple((cx + dx, cy + dy) for dx, dy in DIRS if 0 <= cx + dx < W and 0 <= cy + dy < H)
         if self.seen[y][x]:
             self.newly_seen.append((x, y, DOOR))
-        self._explore = []
+        self._wall_spots = self._find_wall_spots()
+        self._explore, self._search_path = [], []
         self.say("隠し扉を見つけた")
 
-    def _search_class(self, c):
-        """捜索先の種類。0 = 通路の行き止まり (この地図では隠し扉か袋小路の節しかない)、1 = 部屋の壁ぎわ、None = 探す価値なし。
-        壁ぎわは、1 回の捜索が壁 3 マスぶんを調べるので、部屋の端から 3 マスおき (と端) に立つ。壁のすぐ外を既知の通路が通っていても
-        扉があるとは限らない (通過しているだけのことが多い) ので、特別扱いしない。"""
-        x, y = c
-        t = self.tiles[y][x]
-        if t == PASSAGE:
-            return 0 if sum(1 for n in self._nbr[c] if self.seen[n[1]][n[0]] or n in self.mapped) <= 1 else None
-        if t != FLOOR:
-            return None
-        r = self.room_at(x, y)
-        for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
-            if self.tiles[y + dy][x + dx] not in (RWALL, SDOOR):  # 隠し扉は壁に見えている
+    def _find_wall_spots(self):
+        """部屋の壁ぎわで捜索に立つマス。1 回の捜索が壁 3 マスぶんを調べるので、部屋の端から 3 マスおき (と端) に立つ。
+        壁のすぐ外を既知の通路が通っていても扉があるとは限らない (通過しているだけのことが多い) ので、特別扱いしない。"""
+        spots = set()
+        for r in self.rooms:
+            if r["gone"]:
                 continue
-            along, a, b = (x, r["x"] + 1, r["x"] + r["w"] - 2) if dy else (y, r["y"] + 1, r["y"] + r["h"] - 2)
-            if (along - a) % 3 == 1 or along == b:
-                return 1
-        return None
+            a_x, b_x, a_y, b_y = r["x"] + 1, r["x"] + r["w"] - 2, r["y"] + 1, r["y"] + r["h"] - 2
+            for y in range(a_y, b_y + 1):
+                for x in range(a_x, b_x + 1):
+                    if self.tiles[y][x] != FLOOR:
+                        continue
+                    for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+                        if self.tiles[y + dy][x + dx] not in (RWALL, SDOOR):  # 隠し扉は壁に見えている
+                            continue
+                        along, a, b = (x, a_x, b_x) if dy else (y, a_y, b_y)
+                        if (along - a) % 3 == 1 or along == b:
+                            spots.add((x, y))
+                            break
+        return spots
+
+    def _search_class(self, c):
+        """捜索先の種類。0 = 通路の行き止まり (この地図では隠し扉か袋小路の節しかない)、1 = 部屋の壁ぎわ、None = 探す価値なし。"""
+        if self.tiles[c[1]][c[0]] == PASSAGE:
+            return 0 if sum(1 for n in self._nbr[c] if self.seen[n[1]][n[0]] or n in self.mapped) <= 1 else None
+        return 1 if c in self._wall_spots else None
+
+    def _search_ok(self, c, want):
+        return self._search_class(c) == want and self.searched.get(c, 0) < D.SEARCH_CAPS[want]
 
     def _search_target(self):
         """いちばん近い捜索先への経路 (自分のマスならその場)。行き止まりを先に、次に壁ぎわ、それぞれ上限まで。
-        全部使い切ったら、捜索した回数がいちばん少ない所から順に探し続ける (待って餓死するよりはよい)。"""
+        全部使い切ったら、捜索した回数がいちばん少ない所から順に探し続ける (待って餓死するよりはよい)。
+        経路は使い回し、無効になったときだけ探し直す (毎ターン探すと全体の 3 割を食う)。"""
         here = (self.hx, self.hy)
+        path = self._search_path
+        if path and path[0] in self._nbr[here] and self._monster_at(*path[0]) is None:
+            goal = path[-1]
+            want = self._search_class(goal)
+            if want is not None and self.searched.get(goal, 0) < D.SEARCH_CAPS[want]:
+                return path
         for want in (0, 1):
-            def ok(c):
-                return self._search_class(c) == want and self.searched.get(c, 0) < D.SEARCH_CAPS[want]
-            if ok(here):
+            if self._search_ok(here, want):
+                self._search_path = []
                 return []
-            path = self._bfs_path(ok)
+            path = self._bfs_path(lambda c: self._search_ok(c, want))
             if path:
+                self._search_path = path
                 return path
         spots = [c for c in self._nbr if (self.seen[c[1]][c[0]] or c in self.mapped) and self._search_class(c) is not None]
+        self._search_path = []
         if not spots:
             return None
         fewest = min(self.searched.get(c, 0) for c in spots)
@@ -499,6 +522,8 @@ class Game:
             return
         if path:
             self._move_to(path[0])
+            if self._search_path and (self.hx, self.hy) == self._search_path[0]:
+                self._search_path.pop(0)
             return
         self.searched[here] = self.searched.get(here, 0) + 1
         for nx, ny in self._nb8[here]:
