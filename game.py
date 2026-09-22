@@ -356,9 +356,19 @@ class Game:
 
     def _bfs_path(self, goal_fn):
         """勇者から goal_fn を満たす最寄りマスへの経路。既知のマスだけを通り、見えているモンスターは避ける。
-        見えていないモンスターまで避けると、扉の前で眠っている 1 体のせいで「探索先なし」になり、待機しかできなくなる。"""
+
+        見えていないモンスターまで避けると、扉の前で眠っている 1 体のせいで「探索先なし」になり、待機しかできなくなる。
+        見えている眠ったモンスターも、それを避けると道がないときだけは通る (踏み込む 1 歩は攻撃になる)。
+        避け続けると、唯一の通路で眠る 1 体のせいで探索先も階段もなくなり、餓死するまで足踏みする。"""
         visible = self.visible
-        blocked = {(m["x"], m["y"]) for m in self.monsters if (m["x"], m["y"]) in visible}
+        awake = {(m["x"], m["y"]) for m in self.monsters if (m["x"], m["y"]) in visible and m["awake"]}
+        asleep = {(m["x"], m["y"]) for m in self.monsters if (m["x"], m["y"]) in visible and not m["awake"]}
+        path = self._bfs(goal_fn, awake | asleep)
+        if path is None and asleep:
+            path = self._bfs(goal_fn, awake)
+        return path
+
+    def _bfs(self, goal_fn, blocked):
         seen, nbr = self.seen, self._nbr
         start = (self.hx, self.hy)
         prev = {start: None}

@@ -1,6 +1,8 @@
 """画面なしで何回も潜らせて、頭脳ごとの腕前を比べる。目標は地下 20 階。
 
-    uv run sim.py [回数] [最大ターン] [頭脳...]
+    uv run sim.py [回数] [最大ターン] [頭脳...] [--seeds 5003,5007]
+
+--seeds を付けると回数の代わりにそのシードだけを回す。頭脳ごとの 1 回ずつの結果は data/results_<頭脳>.json に残る。
 
 頭脳: random / rules / diver / table:<ラウンド> / laya (未学習) / laya:<世代名>
       @<鋭さ> で行動の引き方を変える (@max で常に最有力、既定は 2.5)
@@ -64,7 +66,8 @@ def play_llm(make_brain, seeds, max_turns, model):
         stats.append(st)
         (DATA / f"llm_{seed}.json").write_text(json.dumps({"result": {k: v for k, v in r.items() if k != "ms"}, "history": st.history},
                                                           ensure_ascii=False, indent=1), encoding="utf-8")
-        print(f"    seed {seed}: {r['depth']} 階 {r['end']} / 方針役 {st.calls} 回 {st.seconds:.0f}s {st.tokens} tokens" + (f" / 停止: {st.stopped}" if st.stopped else ""), flush=True)
+        print(f"    seed {seed}: {r['depth']} 階 {r['end']} / 方針役 {st.calls} 回 {st.seconds:.0f}s {st.tokens} tokens"
+              + (f" / 停止: {st.stopped}" if st.stopped else "") + (f" / 失敗で休止 {st.pauses} 回" if st.pauses else ""), flush=True)
         return r
 
     with ThreadPoolExecutor(LLM_GAMES) as pool:
@@ -119,10 +122,17 @@ def report(name, rs, dt):
 
 
 def main():
-    runs = int(sys.argv[1]) if len(sys.argv) > 1 else 20
-    max_turns = int(sys.argv[2]) if len(sys.argv) > 2 else 8000
-    specs = sys.argv[3:] or ["random", "rules"]
-    seeds = [5000 + i for i in range(runs)]
+    argv = list(sys.argv[1:])
+    seeds = None
+    if "--seeds" in argv:
+        i = argv.index("--seeds")
+        seeds = [int(x) for x in argv[i + 1].split(",")]
+        del argv[i:i + 2]
+    runs = int(argv[0]) if argv else 20
+    max_turns = int(argv[1]) if len(argv) > 1 else 8000
+    specs = argv[2:] or ["random", "rules"]
+    seeds = seeds or [5000 + i for i in range(runs)]
+    runs = len(seeds)
     print(f"{runs} 回 × 最大 {max_turns} ターン (全頭脳で同じシード)\n")
     laya = None
     for full in specs:
@@ -145,6 +155,8 @@ def main():
             with ProcessPoolExecutor() as pool:
                 results = list(pool.map(_cpu_job, [(spec, s, max_turns) for s in seeds], chunksize=2))
         report(full, results, time.perf_counter() - t0)
+        (DATA / f"results_{full.replace(':', '-').replace('@', '_')}.json").write_text(
+            json.dumps({str(s): {k: v for k, v in r.items() if k != "ms"} for s, r in zip(seeds, results)}, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 if __name__ == "__main__":

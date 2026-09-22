@@ -225,7 +225,7 @@ ws.onmessage = ev => {
 let paused = false;
 const TRIGGER_JP = { floor: "階に到着", hp: "体力低下", hunger: "空腹", danger: "強敵", stuck: "足踏み", periodic: "見回り" };
 const PLAN_JP = { explore_fully: "この階を探索し切る", descend_asap: "階段を見つけ次第降りる", free: "おまかせ" };
-const TACTIC_JP = { fight: "戦え", flee: "逃げろ" };
+const TACTIC_JP = { fight: "戦え", flee: "逃げろ", escape: "階段で離脱" };
 let adviser = null;
 function planText(a) {
   return [PLAN_JP[a.plan] ?? a.plan, a.rest ? "傷は休んで治す" : null, TACTIC_JP[a.tactic] ? `敵には「${TACTIC_JP[a.tactic]}」` : null].filter(Boolean).join(" / ");

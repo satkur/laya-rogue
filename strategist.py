@@ -12,7 +12,11 @@
   hunger   空腹になった
   danger   手強い敵 (互角以上、または特殊攻撃持ち) が起きて視界に入った
   stuck    同じ場所を行き来して進んでいない
-  periodic 最後に呼んでから PERIOD ターン経った
+  periodic 最後に呼んでから PERIOD ターン経った (制約が効いているか、体力・空腹に懸念があるときだけ)
+
+方針役の手段は plan (探索し切る / 階段を見つけ次第降りる / 任せる)、rest (9 割まで休む)、tactic (戦え / 逃げろ / 階段で離脱 / 任せる)、
+heal_now (次の手で回復薬)。指示文には実測の事実 (死因の内訳、各手段の効き) を引き継ぎ資料として書いてあるが、
+台本の推奨は渡さない。判断は毎回 LLM が自分でする。API の失敗が 3 回続いたら COOLDOWN ターンは呼ばずに Laya だけで進み、そのあと再開する。
 
 各自の Claude Code ログイン (サブスクリプション) で動く。利用枠は対話利用と共有なので、1 ゲームと 1 プロセスの呼び出し回数に
 上限を置き、超えたら自動で止まる (止まったあとは Laya が制限なしで動く)。ANTHROPIC_API_KEY が環境にあると従量課金に
@@ -26,16 +30,17 @@ import time
 
 from brain import SPECIAL, dist_word, hp_word, threat_word
 
-PERIOD = 200          # 定期の見回り (ターン)
+PERIOD = 300          # 定期の見回り (ターン)。制約が効いているか、体力や空腹に懸念があるときだけ呼ぶ
 MIN_GAP = 6           # 連続で呼ばない最短間隔 (ターン)
 STUCK_SPAN = 40       # このターン数のあいだ、踏んだマスが STUCK_TILES 種類以下なら足踏みとみなす
 STUCK_TILES = 4
 MAX_CALLS_PER_GAME = 150
 MAX_CALLS_TOTAL = 600
 TIMEOUT = 60
+COOLDOWN = 300        # 失敗が 3 回続いたら、このターン数は呼ばずに Laya だけで進む (API 側の一時障害の間、毎回 60 秒待たないため)
 
 PLANS = ["explore_fully", "descend_asap", "free"]
-TACTICS = ["fight", "flee", "free"]
+TACTICS = ["fight", "flee", "escape", "free"]
 SCHEMA = {
     "type": "object",
     "properties": {
@@ -50,29 +55,32 @@ SCHEMA = {
 }
 
 SYSTEM = """You are the strategist for a hero in a Rogue 5.4-style dungeon crawl. Goal: reach dungeon level 20 alive.
-A small, fast model picks the hero's action every turn. You do not pick actions. You set constraints that remove options from it.
-You are consulted only at milestones, in danger, when the hero seems stuck, and periodically. Your decision stays in force until the next consultation.
+A small, fast model ("the pilot", trained by 20,000 games of self-play) picks the hero's action every turn. You do not pick actions. You set constraints that remove options from it, and they stay in force until the next consultation.
+You are consulted at milestones (new level), when HP or hunger worsens, when a non-trivial monster wakes up in view, when the hero seems stuck, and periodically while a constraint is in force. Each consultation costs several seconds of real time, nothing in game time.
 
 Rules of this game (subset of Rogue 5.4.4):
-- Monsters get stronger with depth. The hero gets stronger only by gaining experience levels (killing monsters) and by finding better weapons/armor and strength potions. There are no scrolls, wands, rings or missiles in this version.
-- HP regenerates slowly over time; resting with no enemy around is the main way to heal. Healing potions are scarce.
-- Hunger: one food ration lasts about 1300 turns. "hungry" -> "weak" -> "fainting" -> death by starvation. Food is found only on the floor of new areas, so lingering costs food; each new dungeon level is a new chance to find food.
-- Descending too fast with a low experience level gets the hero killed by mid-level monsters (centaur, troll, etc). Descending too slowly starves the hero. Wandering monsters keep appearing on a level over time.
-- The stairs can be used to escape a fight: monsters do not follow.
-- Special attacks: aquator rusts armor; rattlesnake poison lowers strength; wraith drains level; vampire drains max HP; ice monster freezes; venus flytrap holds (cannot move away); leprechaun steals gold; nymph steals a potion; medusa confuses; sleeping monsters are hit more easily (+4) and most stay asleep unless approached.
+- Monsters get stronger with depth. The hero gets stronger only by experience levels (killing monsters), better weapons/armor found on the floor, and strength potions. There are no scrolls, wands, rings or missiles in this version.
+- HP regenerates slowly (about 1 HP per 10-20 turns at low level, faster later). Resting with no enemy around is the main way to heal. Healing potions are scarce.
+- Hunger: one ration lasts about 1300 turns; "hungry" -> "weak" -> "fainting" -> starvation. Food lies on the floor of unexplored areas; each new level is a fresh chance to find some.
+- Monsters and the hero move at the same speed. On its turn a monster either attacks (if it is already adjacent) or moves one step toward the hero, never both. So stepping away avoids that turn's attack, but the monster follows and the hero gains nothing unless there is somewhere to go (the stairs) or time to regenerate (about 1 HP per 10-20 turns at low level). Fleeing into a dead end or a corner means being hit again. Taking the stairs always works: monsters never follow.
+- Special attacks: aquator rusts armor (permanent, armor is what keeps the hero alive deeper down); rattlesnake poison lowers strength; wraith drains a level; vampire drains max HP; ice monster freezes; venus flytrap holds (cannot move away, must kill it); leprechaun steals gold; nymph steals a potion; medusa confuses. Sleeping monsters are hit more easily; "mean" ones (hobgoblin, troll, quagga, rattlesnake, orc...) usually wake up when they notice the hero.
 
 Your outputs:
-- plan: "explore_fully" = do not take the stairs while unexplored area remains on this level (gain exp and items first). "descend_asap" = once the stairs are known, stop exploring and picking up, go down. "free" = no constraint.
+- plan: "explore_fully" = do not take the stairs while unexplored area remains (more items and experience, but more wandering monsters). "descend_asap" = once the stairs are known, stop exploring and picking up, go down. "free" = no constraint.
 - rest: true = when no awake enemy is in view, only rest (or eat / drink / equip) until HP is at least 90%. Ignored while hungry-weak or worse.
-- tactic (only matters while an awake enemy is in view): "fight" = fleeing and waiting are removed. "flee" = attacking and approaching are removed (running, stairs and potions remain). "free" = no constraint.
-- heal_now: true = drink a healing potion on the next turn if one is available.
-- reason: one short sentence in Japanese (shown to the player).
+- tactic (only matters while an awake enemy is in view, and resets to "free" when no awake enemy is in view): "fight" = running away on foot is removed; attacking, the stairs and potions stay. "flee" = attacking and approaching are removed (only useful to reach the stairs or to stall a slow/held situation). "escape" = if the stairs are known, walk to them and go down now, ignoring the monster; if they are not known it behaves like "flee". "free" = no constraint. The stairs are never removed by a tactic.
+- heal_now: true = drink a healing potion on the next turn if the hero carries one.
+- reason: one short sentence in Japanese, shown to the player.
 
-Measured facts about this version (hundreds of runs), which override general roguelike intuition:
-- The action model was trained by self-play and already plays about as well as hand-written rules (mean depth ~9-10). Its moment-to-moment combat choices are good. Every constraint you set replaced its judgement in past runs and made results WORSE (mean depth 4.5 with a strategist that liked "explore_fully" + "fight", vs 10 without).
-- Lingering on shallow levels is bad: wandering hobgoblins kill a level-1 hero on levels 1-2. A policy that descends as soon as the stairs are found reaches depth ~9-10; one that explores every level fully reaches ~7. Experience comes fast enough from monsters met on the way down.
-- The real wall is dungeon levels 8-13 (centaur, troll, quagga, yeti) with a hero of experience level 4-6. Starting armor two points better adds about 2.4 levels of depth, so picking up and wearing better armor matters more than anything else you can influence.
-So: default to plan="free", rest=false, tactic="free", heal_now=false, and deviate only when the situation clearly calls for it (for example: "descend_asap" when hungry with no food or when a deadly monster is near and the stairs are known; "rest"=true before descending deeper with low HP and no enemy around; "flee" with known stairs against a monster that will clearly win)."""
+Briefing: what was measured in this version (hundreds of games with the same pilot). Use it to calibrate, then decide for yourself.
+- The pilot alone reaches level 8-10 on average (best 17); hand-written rules reach about the same. Nobody has reached 20 yet: the wall is levels 8-13 (centaur, troll, quagga, yeti) against a hero of experience level 4-6.
+- Of 64 deaths: in 52% the killer was already rated "deadly" the first time it was seen, in 91% the stairs were not known yet, and the median time from first sight to death was 7 turns. In 56% the hero had 80%+ HP when the killer appeared. So most deaths are a fight that could not be won or escaped once it started. What a strategist can influence is the state the hero is in when the next monster appears, and whether the stairs are used as an exit.
+- "explore_fully" was worse at every depth tested (wandering monsters arrive faster than the experience helps; a level-1 hero exploring level 1-2 fully is killed by hobgoblins). Forcing "descend_asap" everywhere was also worse than leaving the pilot free (it skips items and easy experience).
+- Forcing rest below 60-75% HP when no enemy is in view gave a small gain (about +0.2 levels). The pilot already rests on its own most of the time.
+- Measured on this pilot over the same 16 seeds: pilot alone 9.4; "rest"=true whenever HP < 60% and no enemy in view 10.0; an older, stronger form of "fight" (which also removed resting and the stairs) forced whenever HP <= 50% with an enemy in view 8.8; both together 7.0. Forcing "flee" at critical HP scored worse than doing nothing. Forcing "escape" against every deadly monster changed nothing on average, because in 9 of 10 such fights the stairs were not known yet. A previous strategist that answered "fight" at nearly every low-HP consultation scored 6.7 against 10.3 for the pilot alone. The pilot's own choice inside a fight is as good as any rule; use "fight"/"flee"/"escape" only when the situation has a feature the pilot cannot see (a known exit, a special attack worth avoiding, a fight that is hopeless by the numbers).
+- A strategist that used "explore_fully" and "fight" liberally scored 4.5; one that left everything free scored about the same as the pilot alone. Every constraint replaces the pilot's judgement, so set one only when you can say why the pilot's default would be wrong here.
+- Starting armor two points better adds about 2.4 levels of depth. Better armor found on the floor is the most valuable thing in the game; aquators (rust) are its main enemy.
+Default to plan="free", rest=false, tactic="free", heal_now=false and deviate with a concrete reason: for example "escape" when a deadly monster is awake, the stairs are known and the hero is not fresh; "rest"=true after a hard fight before pushing deeper; "heal_now" when critical in a fight that is otherwise winnable; "descend_asap" when hungry with no food; "flee"/"escape" from an aquator to protect good armor."""
 
 
 def situation(g, trigger, st):
@@ -97,7 +105,10 @@ def situation(g, trigger, st):
     else:
         lines.append("Monsters in view: none.")
     lines.append("Items in view: " + (", ".join(i["kind"] for i in items[:5]) if items else "none") + ".")
-    lines.append(f"Stairs: {'known' if g.seen[g.stairs[1]][g.stairs[0]] else 'not found yet'}. Unexplored area on this level: {'yes' if 'explore' in valid else 'no'}.")
+    stairs = f"known, {max(abs(g.hx - g.stairs[0]), abs(g.hy - g.stairs[1]))} steps away" if g.seen[g.stairs[1]][g.stairs[0]] else "not found yet"
+    lines.append(f"Stairs: {stairs}. Unexplored area on this level: {'yes' if 'explore' in valid else 'no'}.")
+    if g.gear:
+        lines.append("Carried but not worn: " + ", ".join(x["name"] for x in g.gear) + ".")
     lines.append(f"Decision in force: plan={st.plan}, rest={st.rest}, tactic={st.tactic}.")
     if st.recent:
         lines.append("Recent actions (oldest first): " + " ".join(st.recent[-20:]))
@@ -119,6 +130,8 @@ def ask(text, model="opus", effort="high"):
     if p.returncode != 0:
         raise RuntimeError((p.stderr or p.stdout).strip()[:300])
     out = json.loads(p.stdout)
+    if out.get("is_error"):
+        raise RuntimeError(str(out.get("result", ""))[:200])
     d = out.get("structured_output")
     if not isinstance(d, dict) or d.get("plan") not in PLANS or d.get("tactic") not in TACTICS:
         raise RuntimeError("想定外の応答: " + p.stdout[:300])
@@ -138,11 +151,13 @@ class Strategist:
         self.calls = self.tokens = self.errors = 0
         self.seconds = 0.0
         self.stopped = None  # 自動停止した理由
+        self.paused_until = -1  # 失敗が続いたあと、このターンまで呼ばない
         self.history = []    # 相談の記録 (あとで方針役の判断を読み返すため)
         self.reset()
 
     def reset(self):
         self.plan, self.rest, self.tactic, self.heal_now, self.reason = "free", False, "free", False, ""
+        self.paused_until, self.pauses = -1, 0
         self.depth = 0
         self.floor_turn = self.last_turn = 0
         self.hp_band = self.hunger = None
@@ -176,11 +191,13 @@ class Strategist:
             elif len(self.trail) == STUCK_SPAN and len(set(self.trail)) <= STUCK_TILES and not awake and not (self.rest and hp_word(g) != "full"):
                 trigger, self.kind = "the hero seems stuck (pacing between the same few tiles for 40 turns)", "stuck"
                 self.trail = []
-            elif g.turn - self.last_turn >= PERIOD:
-                trigger, self.kind = "periodic check", "periodic"
+            elif g.turn - self.last_turn >= PERIOD and (self.plan != "free" or self.rest or hp not in ("full", "healthy") or hunger != "fine"):
+                trigger, self.kind = "periodic check (a constraint is in force or HP/hunger deserves a look)", "periodic"
         self.hp_band, self.hunger = hp, hunger
         self.known.update(m["id"] for m in awake)
         if trigger and g.turn - self.last_turn < MIN_GAP and not trigger.startswith("arrived"):
+            return None
+        if trigger and g.turn < self.paused_until:
             return None
         return trigger
 
@@ -199,15 +216,18 @@ class Strategist:
             d, sec, tokens = self.asker(situation(g, trigger, self), self.model, self.effort)
         except Exception as e:  # noqa: BLE001  失敗しても Laya は動き続ける
             self.errors += 1
-            if self.errors >= 3:
-                self.stopped = f"失敗が続いた: {e}"
+            if self.errors >= 3:  # 制約は外して、しばらく Laya だけで進む
+                self.errors = 0
+                self.paused_until = g.turn + COOLDOWN
+                self.plan, self.rest, self.tactic, self.heal_now = "free", False, "free", False
+                self.pauses = getattr(self, "pauses", 0) + 1
             return {"trigger": trigger, "kind": self.kind, "error": str(e)[:200]}
         self.errors = 0
         self.seconds += sec
         self.tokens += tokens
         self.plan, self.rest, self.tactic, self.heal_now, self.reason = d["plan"], d["rest"], d["tactic"], d["heal_now"], d["reason"]
         self.history.append({"turn": g.turn, "depth": g.depth, "hp": g.hp, "max_hp": g.max_hp, "level": g.level, "kind": self.kind,
-                             "trigger": trigger, **d, "sec": round(sec, 1)})
+                             "trigger": trigger, **d, "sec": round(sec, 1), "valid": g.valid_actions(), "recent": self.recent[-12:]})
         return {"trigger": trigger, "kind": self.kind, **d, "sec": round(sec, 1), "tokens": tokens, "calls": self.calls}
 
     # ------------------------------------------------------------------ 選択肢を絞る
@@ -221,9 +241,13 @@ class Strategist:
         awake = any(m["awake"] for m in g.visible_monsters())
         drop = set()
         if awake:
-            if self.tactic == "fight":
-                drop |= {"flee", "rest"}
+            if self.tactic == "fight":  # 徒歩の逃走だけを外す。休憩と階段まで外す形は Laya の成績を下げた (NOTES.md 7 章)
+                drop.add("flee")
             elif self.tactic == "flee":
+                drop |= {"attack", "approach"}
+            elif self.tactic == "escape":
+                if "descend" in valid:
+                    return ["descend"]
                 drop |= {"attack", "approach"}
         elif self.rest and g.hp < 0.9 * g.max_hp and g.hunger_word() in ("fine", "hungry"):
             drop |= {"approach", "pick_up", "explore", "descend"}
