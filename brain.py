@@ -32,6 +32,7 @@ ACTION_DESC = {
     "pick_up": "Walk to the nearest item.",
     "equip": "Put on the better weapon or armor you carry.",
     "explore": "Walk toward unexplored area.",
+    "search": "Search the dead ends and walls for a hidden door.",
     "descend": "Walk to the stairs and go down.",
     "rest": "Wait a turn.",
 }
@@ -244,7 +245,7 @@ class RuleBrain:
         elif not awake and hp in ("wounded", "low", "critical") and g.hunger_word() == "fine":
             a = "rest"
         if a is None:
-            a = next((x for x in ("pick_up", "explore", "descend") if x in valid), "rest")
+            a = next((x for x in ("pick_up", "explore", "descend", "search") if x in valid), "rest")
         return {"action": a, "probs": {a: 1.0}, "state": "", "ms": 0.0}
 
 
@@ -282,5 +283,5 @@ class DiverBrain:
         elif not awake and hp in ("wounded", "low", "critical") and g.hunger_word() == "fine":
             a = "rest"
         else:
-            a = next((x for x in ("pick_up", "descend", "explore") if x in valid), "rest")
+            a = next((x for x in ("pick_up", "descend", "explore", "search") if x in valid), "rest")
         return {"action": a, "probs": {a: 1.0}, "state": "", "ms": 0.0}
