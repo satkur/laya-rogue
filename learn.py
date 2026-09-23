@@ -60,7 +60,7 @@ def score(g):
     gear = ((10 - g.armor["ac"]) + (1 if g.armor.get("protected") else 0) + avg_dice(g.weapon["dice"])
             + g.weapon["dplus"] + 0.5 * g.weapon["hplus"])
     return (w["depth"] * g.depth + w["level"] * g.level + w["kills"] * g.kills + w["gold"] * g.gold
-            + w["hp"] * g.hp / g.max_hp + w["heal"] * g.has_heal() + w["food"] * min(g.food, 3)
+            + w["hp"] * g.hp / max(1, g.max_hp) + w["heal"] * g.has_heal() + w["food"] * min(g.food, 3)
             + w["fed"] * max(0, min(g.food_left, 1300)) / 1300 + w["gear"] * gear + 1.5 * g.str
             + w["explored"] * g.explored + w["missile"] * min(30, sum(g.missiles.values()))
             + w["scroll"] * sum(g.scrolls.get(n, 0) for n in TACTICAL_SCROLLS if n in g.known)

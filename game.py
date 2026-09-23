@@ -731,7 +731,7 @@ class Game:
                 self.hp -= fewer
                 self.max_hp -= fewer
                 if fatal or self.max_hp <= 0:
-                    self.hp = 0
+                    self.hp, self.max_hp = 0, max(1, self.max_hp)  # 死ぬ。最大 HP を 0 のままにすると得点計算が 0 除算になる
                 elif self.hp <= 0:
                     self.hp = 1
                 self.say("急に体が弱くなった")
