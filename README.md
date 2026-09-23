@@ -5,9 +5,9 @@
 ```
 uv sync
 uv run learn.py 16 1200
-uv run train.py 16 gen16 30
+uv run train.py 16 gen19 30
 uv run server.py          # http://127.0.0.1:8766/
-uv run sim.py 16 8000 random rules diver table:16 laya:gen16
+uv run sim.py 16 8000 random rules diver table:16 laya:gen19
 ```
 
 Python 3.12 / uv / CUDA 対応 GPU。

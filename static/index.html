@@ -35,8 +35,8 @@
 
   fieldset { border: 2px solid var(--frame); margin: 0; padding: 6px 10px 10px; min-width: 0; background: var(--panel);
              box-shadow: 4px 4px 0 #050403; }
-  legend { padding: 0 8px; color: #140f08; background: var(--frame); text-shadow: none; }
-  legend em { font-style: normal; background: var(--panel); color: var(--accent); padding: 0 6px; margin-left: 8px; }
+  legend { padding: 0 10px; font-size: 18px; line-height: 1.5; letter-spacing: .1em; color: #120c06; background: var(--frame-hi); text-shadow: none; }
+  legend em { font-style: normal; font-size: 20px; letter-spacing: .06em; background: var(--panel); color: #e8d9a8; padding: 0 10px; margin-left: 10px; border: 1px solid var(--frame); text-shadow: 0 0 4px rgba(200, 150, 80, .25); }
 
   .stage { position: relative; padding: 4px; }
   canvas { display: block; width: 100%; image-rendering: pixelated; }
@@ -144,6 +144,8 @@
         <div class="cell"><div class="v small" id="armor">–</div><div class="k">防具</div></div>
         <div class="cell"><div class="v" id="missiles">0</div><div class="k">飛び道具</div></div>
         <div class="cell"><div class="v" id="scrolls">0</div><div class="k">巻物</div></div>
+        <div class="cell"><div class="v" id="unkp">0</div><div class="k">未識別の薬</div></div>
+        <div class="cell"><div class="v" id="unks">0</div><div class="k">未識別の巻物</div></div>
       </div>
     </fieldset>
     <fieldset>
@@ -180,7 +182,8 @@
 <script>
 const $ = id => document.getElementById(id);
 const JP = { attack: "攻撃", throw: "投擲", approach: "接近", flee: "逃走", quaff_heal: "回復薬", quaff_str: "力の薬",
-             read_map: "地図の巻物", read_teleport: "転移の巻物", eat: "食事", pick_up: "回収",
+             read_map: "地図の巻物", read_teleport: "転移の巻物", quaff_unknown: "未識別の薬", read_unknown: "未識別の巻物",
+             read_identify: "識別の巻物", eat: "食事", pick_up: "回収",
              equip: "装備", explore: "探索", search: "捜索", descend: "階段へ", rest: "待機" };
 const HUNGER_JP = { fine: "十分", hungry: "空腹", weak: "衰弱", fainting: "飢餓" };
 const WEAPON_JP = { mace: "メイス", "long sword": "長剣", "two handed sword": "両手剣", spear: "槍", dagger: "短剣" };
@@ -370,6 +373,7 @@ setInterval(() => {                       // パネルは 10Hz。毎フレーム
   $("gold").textContent = h.gold; $("kills").textContent = h.kills; $("turn").textContent = m.turn;
   $("weapon").textContent = WEAPON_JP[h.weapon] ?? h.weapon; $("armor").textContent = ARMOR_JP[h.armor] ?? h.armor;
   $("missiles").textContent = h.missiles + (h.bow ? "" : " (弓なし)"); $("scrolls").textContent = h.scrolls;
+  $("unkp").textContent = h.unknown_potions ?? 0; $("unks").textContent = h.unknown_scrolls ?? 0;
   const sc = scoreOf(h);
   if (sc > hiscore) { hiscore = sc; try { localStorage.setItem("laya-rogue-hiscore", hiscore); } catch {} }
   $("score").textContent = sc; $("hiscore").textContent = hiscore;
