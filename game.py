@@ -30,7 +30,7 @@ VS_POISON, VS_MAGIC = 0, 3
 LAMP_DIST = 3
 
 ACTIONS = ["attack", "throw", "approach", "flee", "quaff_heal", "quaff_str", "read_map", "read_teleport",
-           "quaff_unknown", "read_unknown", "read_identify",
+           "quaff_unknown", "read_unknown", "read_identify", "zap_attack", "zap_slow", "zap_away", "zap_unknown",
            "eat", "pick_up", "equip", "explore", "search", "descend", "rest"]
 
 
@@ -43,7 +43,7 @@ def avg_dice(dice):
 
 
 HERO_FIELDS = ("kills", "gold", "level", "exp", "str", "max_str", "hp", "max_hp", "food_left", "food", "potions",
-               "weapon", "armor", "gear", "no_food", "missiles", "scrolls", "bow", "known")
+               "weapon", "armor", "gear", "no_food", "missiles", "scrolls", "bow", "known", "sticks")
 
 
 class Game:
@@ -67,7 +67,8 @@ class Game:
         self.bow = True                         # 弓を持っているか (初期装備)。持っていれば矢に弓の威力が乗る
         self.missiles = {"arrow": D.INIT_ARROWS[0] + self.rnd(D.INIT_ARROWS[1])}  # 投げる物: 名前 -> 本数
         self.scrolls = {}                       # 巻物: 名前 -> 枚数
-        self.known = set()                      # 正体の分かった薬と巻物の種類 (未識別の仕組み。使えば分かる)
+        self.sticks = {}                        # 杖: 種類 -> 残り回数 (同じ種類は合算)
+        self.known = set()                      # 正体の分かった薬・巻物・杖の種類 (未識別の仕組み。使えば分かる)
         self.names = self._item_names(seed)     # 未識別のあいだの見た目 (薬の色、巻物の題名)。表示にだけ使う
         self.no_command = 0                     # 凍結・気絶で動けない残りターン
         self.no_move = 0                        # 熊の罠で歩けない残りターン (攻撃や薬は使える)
@@ -100,12 +101,15 @@ class Game:
         names = dict(zip(sorted(D.POTIONS_IN_PLAY), r.sample(D.POTION_COLORS, len(D.POTIONS_IN_PLAY))))
         for kind in sorted(D.SCROLLS_IN_PLAY):
             names[kind] = " ".join(r.choice(D.SCROLL_SYLLABLES) for _ in range(r.randrange(2, 4)))
+        names.update(zip(sorted(D.STICKS_IN_PLAY), r.sample(D.STICK_MATERIALS, len(D.STICKS_IN_PLAY))))
         return names
 
     def label(self, kind):
         """薬・巻物の呼び名。正体が分かっていれば種類名、まだなら色か題名。"""
         if kind in D.POTIONS_IN_PLAY:
             return f"{D.POTION_JP[kind]}の薬" if kind in self.known else f"{self.names[kind]}色の薬"
+        if kind in D.STICKS_IN_PLAY:
+            return f"{D.STICK_JP[kind]}の杖" if kind in self.known else f"{self.names[kind]}の杖"
         return f"{D.SCROLL_JP[kind]}の巻物" if kind in self.known else f"「{self.names[kind]}」の巻物"
 
     # ------------------------------------------------------------------ 乱数 (本家と同じ語彙)
@@ -140,6 +144,7 @@ class Game:
         c.items = [dict(i) for i in self.items]
         c.potions = dict(self.potions)
         c.known = set(self.known)
+        c.sticks = dict(self.sticks)
         c.missiles, c.scrolls = dict(self.missiles), dict(self.scrolls)
         c.weapon, c.armor = dict(self.weapon), dict(self.armor)
         c.gear = [dict(x) for x in self.gear]
@@ -371,6 +376,9 @@ class Game:
             r = self.rnd(100)
             ac += self.rnd(3) + 1 if r < 20 else -(self.rnd(3) + 1) if r < 28 else 0
             return dict(kind="armor", name=name, ac=ac)
+        if kind == "stick":
+            name = self._pick(D.STICK_PROBS)[0]
+            return dict(kind="stick", name=name, charges=self.rnd(D.STICK_CHARGES[0]) + D.STICK_CHARGES[1]) if name in D.STICKS_IN_PLAY else None
         return None
 
     # ------------------------------------------------------------------ 視界: 明るい部屋は全体、それ以外は隣のマスだけ
@@ -791,6 +799,12 @@ class Game:
     def unknown_scrolls(self):
         return {k: n for k, n in self.scrolls.items() if n > 0 and k not in self.known}
 
+    def unknown_sticks(self):
+        return {k: n for k, n in self.sticks.items() if n > 0 and k not in self.known}
+
+    def known_sticks(self):
+        return {k: n for k, n in self.sticks.items() if n > 0 and k in self.known}
+
     def _unknown_pick(self, bag):
         """未識別の物のうちどれを試すか: 多く持っている種類から。同数なら見た目 (色・題名) の順。
         正体の名前順にすると巻物は aggravate → create → … で必ず有害物から試すことになる (アドバイザーの指摘で修正)。"""
@@ -800,11 +814,10 @@ class Game:
         """正体が分かった。有害と分かった残りは捨てる (本家でも使い道がない)。"""
         if kind in self.known:
             return
-        potion = kind in D.POTIONS_IN_PLAY
         before = self.label(kind)
         self.known.add(kind)
         self.say(f"{before}は{self.label(kind)}だった")
-        bag = self.potions if potion else self.scrolls
+        bag = self.potions if kind in D.POTIONS_IN_PLAY else self.sticks if kind in D.STICKS_IN_PLAY else self.scrolls
         if kind in (D.BAD_POTIONS | D.BAD_SCROLLS) and bag.get(kind, 0) > 0:
             self.say(f"残りの{self.label(kind)}を捨てた")
             del bag[kind]
@@ -867,8 +880,14 @@ class Game:
             v.append("quaff_unknown")
         if self.unknown_scrolls():
             v.append("read_unknown")
-        if self.scrolls.get("identify") and "identify" in self.known and (self.unknown_potions() or self.unknown_scrolls()):
+        if self.scrolls.get("identify") and "identify" in self.known and (self.unknown_potions() or self.unknown_scrolls() or self.unknown_sticks()):
             v.append("read_identify")
+        if self.sticks and self._zap_target():
+            for kind, act in (("attack", "zap_attack"), ("slow monster", "zap_slow"), ("teleport away", "zap_away")):
+                if self.sticks.get(kind) and kind in self.known:
+                    v.append(act)
+            if self.unknown_sticks():
+                v.append("zap_unknown")
         if self.food and self.food_left < 1000:
             v.append("eat")
         if free and self.visible_items():
@@ -905,6 +924,52 @@ class Game:
                     break
                 x, y = nx, ny
         return best
+
+    def _zap_target(self):
+        """杖の標的: 8 方向のどれかに直線上で見えている起きた敵 (隣でもよい)。いちばん近いもの。"""
+        best = None
+        for dx, dy in DIRS:
+            x, y = self.hx, self.hy
+            while True:
+                nx, ny = x + dx, y + dy
+                if not self._step_ok(x, y, nx, ny):
+                    break
+                m = self._monster_at(nx, ny)
+                if m:
+                    d = self.dist(nx, ny)
+                    if m["awake"] and (nx, ny) in self.visible and (best is None or d < best[1]):
+                        best = (m, d)
+                    break
+                x, y = nx, ny
+        return best
+
+    def _monster_save(self, m):
+        """モンスターの魔法への抵抗 (save_throw: 14 + VS_MAGIC − レベル / 2 以上を d20 で出す)。"""
+        return self.roll(1, 20) >= 14 + VS_MAGIC - m["lvl"] // 2
+
+    def _zap(self, kind, m):
+        """杖を 1 回振る。攻撃 = 炎・冷気・稲妻の bolt (抵抗に失敗すると 6d6)、鈍足 = 1 ターンおきにしか動けない、追放 = 階のどこかへ飛ばす。"""
+        self.sticks[kind] -= 1
+        if self.sticks[kind] <= 0:
+            del self.sticks[kind]
+        m["awake"] = True
+        if kind == "attack":
+            if self._monster_save(m):
+                self.say(f"杖の光は{m['jp']}をかすめた")
+            else:
+                m["hp"] -= self.roll(6, 6)
+                self.say(f"杖の光が{m['jp']}を打った")
+                if m["hp"] <= 0:
+                    self._kill(m)
+        elif kind == "slow monster":
+            m["slow"] = True
+            self.say(f"{m['jp']}の動きが鈍くなった")
+        elif kind == "teleport away":
+            real = [r for r in self.rooms if not r["gone"]]
+            taken = {(o["x"], o["y"]) for o in self.monsters} | {(self.hx, self.hy)}
+            m["x"], m["y"] = self._floor_spot(self.rng.choice(real), taken)
+            self.say(f"{m['jp']}はどこかへ消えた")
+        self._learn(kind)
 
     def _throw(self):
         target = self._throw_target()
@@ -978,7 +1043,7 @@ class Game:
             self.say("別の場所に飛ばされた")
         elif name == "identify":
             self._learn("identify")
-            unknown = {**self.unknown_potions(), **self.unknown_scrolls()}
+            unknown = {**self.unknown_potions(), **self.unknown_scrolls(), **self.unknown_sticks()}
             if unknown:
                 self._learn(self._unknown_pick(unknown))
             else:
@@ -1076,6 +1141,16 @@ class Game:
             self._read(kind)
         elif action == "read_identify" and self.scrolls.get("identify") and "identify" in self.known:
             self._read("identify")
+        elif action in ("zap_attack", "zap_slow", "zap_away", "zap_unknown"):
+            target = self._zap_target()
+            if target:
+                m = target[0]
+                kind = {"zap_attack": "attack", "zap_slow": "slow monster", "zap_away": "teleport away"}.get(action)
+                if kind is None:
+                    kind = self._unknown_pick(self.unknown_sticks())
+                if self.sticks.get(kind):
+                    self.say(f"{self.label(kind)}を{m['jp']}に向けて振った")
+                    self._zap(kind, m)
         elif action == "eat" and self.food:
             self.food -= 1
             self.food_left = min(D.STOMACH_SIZE, max(0, self.food_left) + D.HUNGER_TIME - 200 + self.rnd(400))
@@ -1129,6 +1204,9 @@ class Game:
                     self.say(f"{self.label(k)}を拾った")
                     if k in self.known and k in D.ENCHANT_SCROLLS:  # 正体が分かっていて読めば必ず得なので、拾った時点で読む
                         self._read(k)
+            elif it["kind"] == "stick":
+                self.sticks[it["name"]] = self.sticks.get(it["name"], 0) + it["charges"]
+                self.say(f"{self.label(it['name'])}を拾った")
             elif it["kind"] == "missile":
                 self.missiles[it["name"]] = self.missiles.get(it["name"], 0) + it["count"]
                 self.say(f"{it['name']} を {it['count']} 拾った")
@@ -1164,6 +1242,8 @@ class Game:
                 # 意地悪 (mean) な相手は、見かけるたびに 2/3 で襲ってくる。強欲 (greedy) も目を覚ます
                 if seen and (("M" in m["flags"] and self.rnd(3) != 0) or "G" in m["flags"]):
                     m["awake"] = True
+                continue
+            if m.get("slow") and self.turn % 2 == 1:  # 鈍足の杖: 1 ターンおきにしか動けない
                 continue
             if m["ch"] == "M" and seen and not m["gazed"]:
                 r = self.room_at(self.hx, self.hy)
