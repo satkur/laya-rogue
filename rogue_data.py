@@ -114,6 +114,15 @@ SCROLL_JP = {"enchant armor": "鎧強化", "enchant weapon": "武器強化", "pr
              "teleportation": "瞬間移動", "identify": "識別", "sleep": "眠り", "create monster": "怪物召喚", "aggravate monsters": "怪物寄せ"}
 ENCHANT_SCROLLS = ("enchant armor", "enchant weapon", "protect armor")   # 読めば必ず得をする巻物 (拾った時点で読む)
 
+# 杖 (ws_info の出現率)。判断ボードの回答で 3 種にまとめる: 攻撃 = striking 9 + lightning 3 + fire 3 + cold 3 + magic missile 10、
+# 鈍足 = slow monster 11、追放 = teleport away 6。残り (light 12・polymorph 15・haste monster 10・drain life 9・nothing 1・teleport to 6・cancellation 5) は
+# 出さないが、杖そのものの本数は本家どおりにする (薬・巻物と違って「消える」扱いにしない。杖は初見で勝てない敵への数少ない答えなので)
+STICK_PROBS = [("attack", 28), ("slow monster", 11), ("teleport away", 6)]
+STICKS_IN_PLAY = {"attack", "slow monster", "teleport away"}
+STICK_JP = {"attack": "攻撃", "slow monster": "鈍足", "teleport away": "追放"}
+STICK_CHARGES = (5, 3)   # 回数は rnd(5) + 3 (sticks.c の fix_stick)
+STICK_MATERIALS = ["鋼", "黒檀", "樫", "柳", "松", "水晶", "鉄", "銀", "真鍮", "紫檀"]   # 未識別のあいだの見た目 (本家の wood / metal)
+
 # 防具 (arm_info の出現率と a_class の防御。防御は小さいほど硬い)
 ARMORS = [("leather armor", 20, 8), ("ring mail", 15, 7), ("studded leather armor", 15, 7), ("scale mail", 13, 6),
           ("chain mail", 12, 5), ("splint mail", 10, 4), ("banded mail", 10, 4), ("plate mail", 5, 3)]

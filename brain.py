@@ -30,7 +30,11 @@ ACTION_DESC = {
     "read_teleport": "Read the scroll of teleportation.",
     "quaff_unknown": "Drink an unidentified potion; you learn what it was.",
     "read_unknown": "Read an unidentified scroll; you learn what it was.",
-    "read_identify": "Read the scroll of identify to learn what one unidentified potion or scroll you carry is.",
+    "read_identify": "Read the scroll of identify to learn what one unidentified potion, scroll or wand you carry is.",
+    "zap_attack": "Zap the wand of attack at the enemy in line: a bolt that hurts it badly unless it resists.",
+    "zap_slow": "Zap the wand of slow monster at the enemy in line: it then moves only every other turn.",
+    "zap_away": "Zap the wand of teleport away at the enemy in line: it is sent somewhere else on this level.",
+    "zap_unknown": "Zap an unidentified wand at the enemy in line; you learn what it was.",
     "eat": "Eat food.",
     "pick_up": "Walk to the nearest item.",
     "equip": "Put on the better weapon or armor you carry.",
@@ -69,6 +73,11 @@ def scroll_words(g):
     return ", ".join(kinds) if kinds else "none"
 
 
+def wand_words(g):
+    kinds = [w for w, name in (("attack", "attack"), ("slow", "slow monster"), ("teleport-away", "teleport away")) if g.known_sticks().get(name)]
+    return ", ".join(kinds) if kinds else "none"
+
+
 def depth_word(d):
     return "shallow" if d <= 4 else "middle" if d <= 9 else "deep" if d <= 14 else "abyss"
 
@@ -98,7 +107,8 @@ def describe(g, valid):
              f"Food: {count_word(g.food)}.", f"Healing potions: {count_word(g.has_heal())}.",
              f"Missiles: {count_word(sum(g.missiles.values()))}.", f"Scrolls: {scroll_words(g)}.",
              f"Unidentified potions: {count_word(sum(g.unknown_potions().values()))}.",
-             f"Unidentified scrolls: {count_word(sum(g.unknown_scrolls().values()))}."]
+             f"Unidentified scrolls: {count_word(sum(g.unknown_scrolls().values()))}.",
+             f"Wands: {wand_words(g)}.", f"Unidentified wands: {count_word(len(g.unknown_sticks()))}."]
     status = [w for w, on in (("confused", g.confused), ("held", g.held_by is not None), ("weakened", g.str < g.max_str)) if on]
     if status:
         parts.append("Status: " + ", ".join(status) + ".")
@@ -239,6 +249,14 @@ class RuleBrain:
             a = "quaff_heal"
         elif hp == "critical" and deadly and "read_teleport" in valid:
             a = "read_teleport"
+        elif deadly and "zap_away" in valid:
+            a = "zap_away"
+        elif deadly and "zap_slow" in valid:
+            a = "zap_slow"
+        elif (deadly or hurt) and "zap_attack" in valid:
+            a = "zap_attack"
+        elif deadly and "zap_unknown" in valid:
+            a = "zap_unknown"
         elif "quaff_str" in valid and not awake:
             a = "quaff_str"
         elif "equip" in valid and not awake:
@@ -283,6 +301,14 @@ class DiverBrain:
             a = "quaff_heal"
         elif hp == "critical" and "read_teleport" in valid and any(threat_word(g, m) == "deadly" for m in awake):
             a = "read_teleport"
+        elif any(threat_word(g, m) == "deadly" for m in awake) and "zap_away" in valid:
+            a = "zap_away"
+        elif any(threat_word(g, m) == "deadly" for m in awake) and "zap_slow" in valid:
+            a = "zap_slow"
+        elif (hurt or any(threat_word(g, m) == "deadly" for m in awake)) and "zap_attack" in valid:
+            a = "zap_attack"
+        elif any(threat_word(g, m) == "deadly" for m in awake) and "zap_unknown" in valid:
+            a = "zap_unknown"
         elif "eat" in valid and g.hunger_word() != "fine":
             a = "eat"
         elif not awake and "quaff_str" in valid:

@@ -44,6 +44,7 @@ PLANS = ["explore_fully", "descend_asap", "free"]
 TACTICS = ["fight", "flee", "escape", "free"]
 READS = ["none", "map", "teleport"]
 TRIES = ["none", "potion", "scroll", "identify"]
+ZAPS = ["none", "attack", "slow", "away", "unknown"]
 SCHEMA = {
     "type": "object",
     "properties": {
@@ -53,9 +54,10 @@ SCHEMA = {
         "heal_now": {"type": "boolean"},
         "read_now": {"type": "string", "enum": READS},
         "try_now": {"type": "string", "enum": TRIES},
+        "zap_now": {"type": "string", "enum": ZAPS},
         "reason": {"type": "string"},
     },
-    "required": ["plan", "rest", "tactic", "heal_now", "read_now", "try_now", "reason"],
+    "required": ["plan", "rest", "tactic", "heal_now", "read_now", "try_now", "zap_now", "reason"],
     "additionalProperties": False,
 }
 
@@ -64,7 +66,8 @@ A small, fast model ("the pilot", trained by 20,000 games of self-play) picks th
 You are consulted at milestones (new level), when HP or hunger worsens, when a non-trivial monster wakes up in view, when the hero seems stuck, and periodically while a constraint is in force. Each consultation costs several seconds of real time, nothing in game time.
 
 Rules of this game (subset of Rogue 5.4.4):
-- Monsters get stronger with depth. The hero gets stronger by experience levels (killing monsters), better weapons/armor found on the floor, strength potions, and scrolls of enchant armor / enchant weapon / protect armor (applied automatically when picked up). There are no wands or rings.
+- Monsters get stronger with depth. The hero gets stronger by experience levels (killing monsters), better weapons/armor found on the floor, strength potions, and scrolls of enchant armor / enchant weapon / protect armor (applied automatically when picked up). There are no rings.
+- Wands (3 kinds, unidentified until zapped, 3-7 charges): attack (a bolt for 6d6 unless the monster resists), slow monster (it moves every other turn), teleport away (it is sent elsewhere on the level). The pilot gets "zap_attack" / "zap_slow" / "zap_away" for known wands and "zap_unknown", only when an awake monster is in a straight line. These are the answer to a monster the hero cannot beat in melee; charges do not come back.
 - Potions and scrolls are unidentified when found (only a color or a title is visible). Using one reveals its kind for the rest of the game; once a kind is known to be useless it is discarded and never picked up again. Kinds in play - potions: healing, extra healing, gain strength, restore strength, poison (strength -1 to -3, restored by restore strength), confusion (20-27 turns of stumbling). Scrolls: enchant armor, enchant weapon, protect armor (read automatically once known), magic mapping, teleportation, identify (reveals one unidentified kind the hero carries), sleep (4-7 turns helpless), create monster (a monster appears next to the hero), aggravate monsters (every monster on the level wakes up and comes). Roughly 3 in 10 unknown potions and 2 in 10 unknown scrolls are harmful. The pilot has "quaff_unknown" / "read_unknown" (tries the unknown kind it carries most of) and "read_identify".
 - Scrolls the strategist can trigger: magic mapping (reveals the whole level including the stairs; useful when the stairs are unknown and the hero needs an exit or is hungry) and teleportation (moves the hero to a random spot on the level, breaking contact with every monster; the one reliable escape when the stairs are unknown).
 - Traps (7 kinds, hidden until stepped on: trap door to the next level, bear trap, sleeping gas, arrow, teleport, poison dart, rust). A trap the hero has stepped on is avoided afterwards. There are no hidden doors.
@@ -80,6 +83,7 @@ Your outputs:
 - tactic (only matters while an awake enemy is in view, and resets to "free" when no awake enemy is in view): "fight" = running away on foot is removed; attacking, the stairs and potions stay. "flee" = attacking and approaching are removed (only useful to reach the stairs or to stall a slow/held situation). "escape" = if the stairs are known, walk to them and go down now, ignoring the monster; if they are not known it behaves like "flee". "free" = no constraint. The stairs are never removed by a tactic.
 - heal_now: true = drink a healing potion on the next turn if the hero carries one.
 - read_now: "map" = read magic mapping on the next turn (if carried and the stairs are unknown); "teleport" = read teleportation on the next turn (if carried and an enemy is awake in view); "none" = nothing. One-shot.
+- zap_now: "attack" / "slow" / "away" = zap that known wand on the next turn if carried and an awake monster is in line; "unknown" = zap an unidentified wand; "none" = nothing. One-shot.
 - try_now: "potion" = drink an unidentified potion on the next turn; "scroll" = read an unidentified scroll; "identify" = read a known scroll of identify; "none" = nothing. One-shot. Testing unknown items is safest with no monster in view, full HP and the stairs known.
 - reason: one short sentence in Japanese, shown to the player.
 
@@ -92,7 +96,7 @@ Briefing: what was measured in this version (hundreds of games with the same pil
 - A strategist that used "explore_fully" and "fight" liberally scored 4.5; one that left everything free scored about the same as the pilot alone. Every constraint replaces the pilot's judgement, so set one only when you can say why the pilot's default would be wrong here.
 - Starting armor two points better adds about 2.4 levels of depth. Better armor found on the floor is the most valuable thing in the game; aquators (rust) are its main enemy.
 Note: scrolls and missiles were added after the measurements above; the pilot was retrained with them, and their effect on the strategist's levers is not measured yet.
-Default to plan="free", rest=false, tactic="free", heal_now=false, read_now="none", try_now="none" and deviate with a concrete reason: for example "escape" when a deadly monster is awake, the stairs are known and the hero is not fresh; "rest"=true after a hard fight before pushing deeper; "heal_now" when critical in a fight that is otherwise winnable; "descend_asap" when hungry with no food; "flee"/"escape" from an aquator to protect good armor."""
+Default to plan="free", rest=false, tactic="free", heal_now=false, read_now="none", try_now="none", zap_now="none" and deviate with a concrete reason: for example "escape" when a deadly monster is awake, the stairs are known and the hero is not fresh; "rest"=true after a hard fight before pushing deeper; "heal_now" when critical in a fight that is otherwise winnable; "descend_asap" when hungry with no food; "flee"/"escape" from an aquator to protect good armor."""
 
 
 def situation(g, trigger, st):
@@ -111,6 +115,7 @@ def situation(g, trigger, st):
         f"Missiles: {sum(g.missiles.values())} ({', '.join(f'{n} x{c}' for n, c in g.missiles.items()) or 'none'}), bow: {'yes' if g.bow else 'no'}. "
         f"Known scrolls: {', '.join(f'{n} x{c}' for n, c in g.scrolls.items() if n in g.known and c > 0) or 'none'}. "
         f"Unidentified scrolls: {sum(g.unknown_scrolls().values())} ({len(g.unknown_scrolls())} kinds). "
+        f"Wands: {', '.join(f'{n} x{c}' for n, c in g.known_sticks().items()) or 'none'}; unidentified wands: {len(g.unknown_sticks())}. "
         f"Identified kinds so far: {', '.join(sorted(g.known)) or 'none'}.",
         "Status: " + (", ".join(w for w, on in (("confused", g.confused), ("held", g.held_by is not None), ("cannot act", g.no_command > 0)) if on) or "normal") + ".",
     ]
@@ -151,7 +156,7 @@ def ask(text, model=DEFAULT_MODEL, effort="high"):
         raise RuntimeError(str(out.get("result", ""))[:200])
     d = out.get("structured_output")
     if (not isinstance(d, dict) or d.get("plan") not in PLANS or d.get("tactic") not in TACTICS or d.get("read_now", "none") not in READS
-            or d.get("try_now", "none") not in TRIES):
+            or d.get("try_now", "none") not in TRIES or d.get("zap_now", "none") not in ZAPS):
         raise RuntimeError("想定外の応答: " + p.stdout[:300])
     u = out.get("usage", {})
     tokens = sum(u.get(k, 0) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"))
@@ -175,7 +180,7 @@ class Strategist:
 
     def reset(self):
         self.plan, self.rest, self.tactic, self.heal_now, self.reason = "free", False, "free", False, ""
-        self.read_now = self.try_now = "none"
+        self.read_now = self.try_now = self.zap_now = "none"
         self.paused_until, self.pauses = -1, 0
         self.depth = 0
         self.floor_turn = self.last_turn = 0
@@ -247,6 +252,7 @@ class Strategist:
         self.plan, self.rest, self.tactic, self.heal_now, self.reason = d["plan"], d["rest"], d["tactic"], d["heal_now"], d["reason"]
         self.read_now = d.get("read_now", "none")
         self.try_now = d.get("try_now", "none")
+        self.zap_now = d.get("zap_now", "none")
         self.history.append({"turn": g.turn, "depth": g.depth, "hp": g.hp, "max_hp": g.max_hp, "level": g.level, "kind": self.kind,
                              "trigger": trigger, **d, "sec": round(sec, 1), "valid": g.valid_actions(), "recent": self.recent[-12:]})
         return {"trigger": trigger, "kind": self.kind, **d, "sec": round(sec, 1), "tokens": tokens, "calls": self.calls}
@@ -266,6 +272,11 @@ class Strategist:
         if self.try_now != "none":
             action = {"potion": "quaff_unknown", "scroll": "read_unknown", "identify": "read_identify"}[self.try_now]
             self.try_now = "none"
+            if action in valid:
+                return [action]
+        if self.zap_now != "none":
+            action = {"attack": "zap_attack", "slow": "zap_slow", "away": "zap_away", "unknown": "zap_unknown"}[self.zap_now]
+            self.zap_now = "none"
             if action in valid:
                 return [action]
         awake = any(m["awake"] for m in g.visible_monsters())
