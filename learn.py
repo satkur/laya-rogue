@@ -50,7 +50,8 @@ POOL_PER_DEPTH = 300
 # 巻物の価値は「転移を持っている」ことにだけ付ける。強化の巻物は拾った時点で読まれて装備 (gear) の得点になる。地図は持っていても
 # 点にしない (持つことに点を付けると読むと損になり、1 回目の学習で地図を読む率が 1〜2% になった)
 # 未識別の薬・巻物は 1 つ 0.5 (拾う価値はあるが、正体の分かった回復薬 2.5 より低い。試して当たれば得、外れれば損は効果そのものから)
-WANTS = dict(depth=10, level=5, kills=0.5, gold=0.01, hp=5, heal=2.5, food=3, fed=6, gear=1.5, explored=0.006, death=50,
+# 死の減点は残りの階数に比例して増やす (浅い階で死ぬほど失うものが大きい)。50 固定だと「1 階のために 15% の死亡リスクを取る」のが最適になっていた
+WANTS = dict(depth=10, level=5, kills=0.5, gold=0.01, hp=5, heal=2.5, food=3, fed=6, gear=1.5, explored=0.006, death=50, death_per_floor=5,
              missile=0.1, scroll=0.5, unknown=0.5)
 TACTICAL_SCROLLS = ("teleportation",)
 
@@ -65,7 +66,7 @@ def score(g):
             + w["explored"] * g.explored + w["missile"] * min(30, sum(g.missiles.values()))
             + w["scroll"] * sum(g.scrolls.get(n, 0) for n in TACTICAL_SCROLLS if n in g.known)
             + w["unknown"] * (sum(g.unknown_potions().values()) + sum(g.unknown_scrolls().values()))
-            + (100 if g.won else 0) - (w["death"] if g.dead else 0))
+            + (100 if g.won else 0) - ((w["death"] + w["death_per_floor"] * max(0, 20 - g.depth)) if g.dead else 0))
 
 
 TEXTS_PER_KEY = 24  # 粗いキー 1 つにつき、Laya の教材として控えておく状況文の数

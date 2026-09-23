@@ -73,6 +73,13 @@ def depth_word(d):
     return "shallow" if d <= 4 else "middle" if d <= 9 else "deep" if d <= 14 else "abyss"
 
 
+def pace_word(g):
+    """この深さに対して勇者のレベルが足りているか。「降りる前に鍛えるか」を状況文と経験表のキーに載せる (アドバイザーの提案)。
+    目安は本家の経験則 (10 階で Lv8 なら余裕、Lv5 でぎりぎり、Lv4 以下は無理)。"""
+    r = g.level / max(1, g.depth)
+    return "ahead" if r >= 0.8 else "even" if r >= 0.5 else "behind"
+
+
 # 殴り合いの見積もり (threat_word) に出てこない厄介さ。経験表のキーに入れて、種別ごとに対処を学べるようにする
 SPECIAL = {"L": "steal", "N": "steal",                                # 金貨・持ち物を盗んで消える
            "A": "weaken", "R": "weaken", "W": "weaken", "V": "weaken",  # 鎧の錆び・毒・レベル吸収・最大 HP 吸収
@@ -87,7 +94,7 @@ def describe(g, valid):
     """状況文。数値を避けて語彙を絞ってある。"""
     mons = g.visible_monsters()
     items = g.visible_items()
-    parts = [f"Depth: {depth_word(g.depth)}.", f"HP {hp_word(g)}.", f"Hunger: {g.hunger_word()}.",
+    parts = [f"Depth: {depth_word(g.depth)}.", f"Experience for this depth: {pace_word(g)}.", f"HP {hp_word(g)}.", f"Hunger: {g.hunger_word()}.",
              f"Food: {count_word(g.food)}.", f"Healing potions: {count_word(g.has_heal())}.",
              f"Missiles: {count_word(sum(g.missiles.values()))}.", f"Scrolls: {scroll_words(g)}.",
              f"Unidentified potions: {count_word(sum(g.unknown_potions().values()))}.",
@@ -128,7 +135,7 @@ def coarse_key(g, valid):
         enemy = "none"
     hunger = g.hunger_word()
     flags = "".join(c for c, on in (("H", g.held_by is not None), ("C", g.confused)) if on)
-    return "|".join([hp_word(g), "starving" if hunger in ("weak", "fainting") else hunger, enemy, flags, ",".join(valid)])
+    return "|".join([hp_word(g), "starving" if hunger in ("weak", "fainting") else hunger, enemy, flags, pace_word(g), ",".join(valid)])
 
 
 def choose(probs, sharpness, rng):
