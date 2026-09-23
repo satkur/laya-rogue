@@ -27,13 +27,16 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-from brain import TAU, coarse_key, describe
+from brain import TAU, coarse_key, describe, hp_word
 from game import Game, avg_dice
 
 DATA = Path(__file__).parent / "data"
 HORIZON = 40        # 先読みするターン数
 ROLLOUTS = 3        # 1 行動あたりの先読み回数
 P_EVAL = 0.05       # 通過した局面のうち、先読みで調べる割合
+P_EVAL_RARE = 0.5   # 稀な判断 (薬・巻物を使う、危険な場面で未識別を試す) が選べる局面は、この割合で調べる。
+                    # 5% のままだと経験表の重みが 4 に届かず、回復薬や転移の使い方を判断ヘッドに教えていなかった (NOTES.md 11 章)
+RARE_ACTIONS = {"quaff_heal", "quaff_str", "read_map", "read_teleport", "read_identify"}
 MAX_TURNS = 3000
 EPSILON = 0.15      # 表を無視して気まぐれに動く確率 (知らない局面に出会うため)
 DECAY = 0.5         # ラウンドをまたぐとき、古い経験の重みをこれだけ残す
@@ -134,7 +137,10 @@ def episode(args):
         turns += 1
         valid = g.valid_actions()
         key = coarse_key(g, valid)
-        if len(valid) > 1 and rng.random() < P_EVAL:
+        gamble = ("quaff_unknown" in valid or "read_unknown" in valid) and (
+            hp_word(g) in ("low", "critical") or any(m["awake"] for m in g.visible_monsters()))
+        p_eval = P_EVAL_RARE if (RARE_ACTIONS & set(valid) or gamble) else P_EVAL
+        if len(valid) > 1 and rng.random() < p_eval:
             # 行動どうしの比較では同じ乱数列を使う。「運の差」が消えて「行動の差」だけが残る
             seeds = [rng.random() for _ in range(ROLLOUTS)]
             out.append((key, describe(g, valid), {a: sum(rollout(g, a, _table, _v_default, s) for s in seeds) / ROLLOUTS for a in valid}))

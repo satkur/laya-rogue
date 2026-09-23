@@ -116,7 +116,7 @@ class Game:
         return sum(self.rnd(sides) + 1 for _ in range(n))
 
     def spread(self, n):
-        return n - n // 10 + self.rnd(n // 5)
+        return n - n // 20 + self.rnd(n // 10)  # misc.c: nm - nm / 20 + rnd(nm / 10)
 
     def save(self, which):
         return self.roll(1, 20) >= 14 + which - self.level // 2
@@ -664,13 +664,13 @@ class Game:
             self.new_floor()
             self._fell = True
         elif k == "bear trap":
-            self.no_move += D.BEARTIME
+            self.no_move += self.spread(D.BEARTIME)
             self.say("熊の罠に足を挟まれた")
         elif k == "sleeping gas":
-            self.no_command += D.SLEEPTIME
+            self.no_command += self.spread(D.SLEEPTIME)
             self.say("白い霧に包まれて眠ってしまった")
         elif k == "arrow trap":
-            if self._swing(self.depth - 1, self.armor["ac"], 1):
+            if self._swing(self.level - 1, self.armor["ac"], 1):  # 本家は勇者のレベル (階ではない)
                 self.hp -= self.roll(1, 6)
                 self.say("矢が飛んできて刺さった")
             else:
@@ -680,7 +680,7 @@ class Game:
             self.say("転移の罠を踏んだ")
             self._teleport()
         elif k == "dart trap":
-            if self._swing(self.depth + 1, self.armor["ac"], 1):
+            if self._swing(self.level + 1, self.armor["ac"], 1):
                 self.hp -= self.roll(1, 4)
                 if not self.save(VS_POISON) and self.str > 3:
                     self.str -= 1
@@ -791,10 +791,10 @@ class Game:
     def unknown_scrolls(self):
         return {k: n for k, n in self.scrolls.items() if n > 0 and k not in self.known}
 
-    @staticmethod
-    def _unknown_pick(bag):
-        """未識別の物のうちどれを試すか: 多く持っている種類から (同数なら名前順。名前は Laya には見えない)。"""
-        return max(sorted(bag), key=bag.get)
+    def _unknown_pick(self, bag):
+        """未識別の物のうちどれを試すか: 多く持っている種類から。同数なら見た目 (色・題名) の順。
+        正体の名前順にすると巻物は aggravate → create → … で必ず有害物から試すことになる (アドバイザーの指摘で修正)。"""
+        return max(sorted(bag, key=lambda k: self.names[k]), key=bag.get)
 
     def _learn(self, kind):
         """正体が分かった。有害と分かった残りは捨てる (本家でも使い道がない)。"""
@@ -984,7 +984,7 @@ class Game:
             else:
                 self.say("識別の巻物だったが、調べる物がなかった")
         elif name == "sleep":
-            self.no_command += self.rnd(4) + 4  # rnd(SLEEPTIME) + 4
+            self.no_command += self.rnd(self.spread(D.SLEEPTIME)) + 4  # rnd(SLEEPTIME) + 4
             self.say("眠気に襲われた (眠り)")
         elif name == "create monster":
             free = [c for c in self._nb8[(self.hx, self.hy)] if self.tiles[c[1]][c[0]] in PASSABLE and not self._monster_at(*c)]

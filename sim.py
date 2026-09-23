@@ -18,6 +18,7 @@ from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
+import rogue_data as D
 from brain import DiverBrain, RandomBrain, RuleBrain, TableBrain
 from game import Game
 
@@ -50,7 +51,7 @@ class Locked:
             return self.brain.decide(g)
 
 
-def play_llm(make_brain, seeds, max_turns, model):
+def play_llm(make_brain, seeds, max_turns, model, start=None):
     import threading
     from concurrent.futures import ThreadPoolExecutor
 
@@ -64,7 +65,7 @@ def play_llm(make_brain, seeds, max_turns, model):
 
     def one(seed):
         st = Strategist(model=model)
-        r = play(Guided(Locked(make_brain(), lock), st), seed, max_turns)
+        r = play(Guided(Locked(make_brain(), lock), st), seed, max_turns, start)
         stats.append(st)
         (DATA / f"llm_{seed}.json").write_text(json.dumps({"result": {k: v for k, v in r.items() if k != "ms"}, "history": st.history},
                                                           ensure_ascii=False, indent=1), encoding="utf-8")
@@ -91,8 +92,20 @@ def make_cpu_brain(spec):
     raise ValueError(spec)
 
 
-def play(brain, seed, max_turns):
-    g = Game(seed)
+def standard_hero(depth):
+    """中盤開始の物差し用の標準の勇者 (1〜2 階のホブゴブリンくじを排除して、深い階での判断だけを測る。アドバイザーの提案)。
+    6 階なら Lv5、10 階以降なら Lv7。防御は初期装備のまま、正体の分かった回復薬 1 つ、矢 30 本。"""
+    lvl = 5 if depth < 10 else 7
+    st = Game(0).hero_state()
+    st.update(depth=depth, level=lvl, exp=D.EXP_LEVELS[lvl - 2], max_hp=12 + (lvl - 1) * 5, hp=12 + (lvl - 1) * 5,
+              potions={"healing": 1}, known={"healing"}, missiles={"arrow": 30})
+    return st
+
+
+def play(brain, seed, max_turns, start=None):
+    g = Game(seed, standard_hero(start) if start else None)
+    if hasattr(brain, "rng"):  # 行動を引く乱数もゲームごとにシードで決める。共有したままだと同じ重みでも並べる順で結果が変わる
+        brain.rng = random.Random(seed)
     ms, miss, n = [], 0, 0
     while not g.over and g.turn < max_turns:
         d = brain.decide(g)
@@ -107,8 +120,18 @@ def play(brain, seed, max_turns):
 
 
 def _cpu_job(args):
-    spec, seed, max_turns = args
-    return play(make_cpu_brain(spec), seed, max_turns)
+    spec, seed, max_turns, start = args
+    return play(make_cpu_brain(spec), seed, max_turns, start)
+
+
+def band_deaths(rs):
+    """階の帯ごとの死亡率 = その帯で死んだ数 / その帯の階に着いた延べ数。平均到達階より分散が小さく、どの帯で良くなったかが分かる。"""
+    out = []
+    for lo, hi in ((1, 4), (5, 8), (9, 12), (13, 99)):
+        arrivals = sum(max(0, min(r["depth"], hi) - lo + 1) for r in rs)
+        deaths = sum(1 for r in rs if r["end"] not in ("到達", "時間切れ") and lo <= r["depth"] <= hi)
+        out.append(f"{lo}-{hi if hi < 99 else ''}: {deaths / arrivals:.0%}" if arrivals else f"{lo}-: -")
+    return " ".join(out)
 
 
 def report(name, rs, dt):
@@ -116,11 +139,12 @@ def report(name, rs, dt):
     ms = [m for r in rs for m in r["ms"]]
     miss = statistics.mean(r["miss"] for r in rs)
     ends = Counter(r["end"] for r in rs)
-    print(f"[{name:24s}] 到達階 平均 {statistics.mean(depth):5.2f} 中央 {statistics.median(depth):4.1f} 最高 {max(depth):2d} | "
+    se = statistics.stdev(depth) / len(depth) ** 0.5 if len(depth) > 1 else 0.0
+    print(f"[{name:24s}] 到達階 平均 {statistics.mean(depth):5.2f} ±{se:.2f} 中央 {statistics.median(depth):4.1f} 最高 {max(depth):2d} | "
           f"10階+ {sum(d >= 10 for d in depth):2d} 20階 {ends['到達']:2d} /{len(rs)} | Lv {statistics.mean(r['level'] for r in rs):4.1f} | "
           f"撃破 {statistics.mean(r['kills'] for r in rs):5.1f} | 金貨 {statistics.mean(r['gold'] for r in rs):5.0f} | ターン {statistics.mean(r['turn'] for r in rs):5.0f}"
           + (f" | 推論 {statistics.median(ms):.1f} ms" if ms else "") + (f" | 表にない状況 {miss:.0%}" if miss else "") + f" | {dt:.0f}s", flush=True)
-    print("    終わり方: " + " ".join(f"{k}×{v}" for k, v in ends.most_common(7)), flush=True)
+    print("    終わり方: " + " ".join(f"{k}×{v}" for k, v in ends.most_common(7)) + " | 死亡率 " + band_deaths(rs), flush=True)
 
 
 def main():
@@ -130,12 +154,17 @@ def main():
         i = argv.index("--seeds")
         seeds = [int(x) for x in argv[i + 1].split(",")]
         del argv[i:i + 2]
+    start = None
+    if "--start" in argv:  # 中盤開始の物差し: この階から標準の勇者で始める
+        i = argv.index("--start")
+        start = int(argv[i + 1])
+        del argv[i:i + 2]
     runs = int(argv[0]) if argv else 20
     max_turns = int(argv[1]) if len(argv) > 1 else 8000
     specs = argv[2:] or ["random", "rules"]
     seeds = seeds or [5000 + i for i in range(runs)]
     runs = len(seeds)
-    print(f"{runs} 回 × 最大 {max_turns} ターン (全頭脳で同じシード)\n")
+    print(f"{runs} 回 × 最大 {max_turns} ターン (全頭脳で同じシード)" + (f"、B{start}F から標準の勇者で開始" if start else "") + "\n")
     laya = None
     for full in specs:
         t0 = time.perf_counter()
@@ -150,12 +179,14 @@ def main():
             else:
                 laya.load_generation(gen)
             laya.sharpness = sharpness
-            results = play_llm(lambda: laya, seeds, max_turns, llm) if llm else [play(laya, s, max_turns) for s in seeds]
+            results = play_llm(lambda: laya, seeds, max_turns, llm, start) if llm else [play(laya, s, max_turns, start) for s in seeds]
         elif llm:
-            results = play_llm(lambda: make_cpu_brain(spec), seeds, max_turns, llm)
+            results = play_llm(lambda: make_cpu_brain(spec), seeds, max_turns, llm, start)
         else:
             with ProcessPoolExecutor() as pool:
-                results = list(pool.map(_cpu_job, [(spec, s, max_turns) for s in seeds], chunksize=2))
+                results = list(pool.map(_cpu_job, [(spec, s, max_turns, start) for s in seeds], chunksize=2))
+        if start:
+            full += f"@B{start}"
         report(full, results, time.perf_counter() - t0)
         (DATA / f"results_{full.replace(':', '-').replace('@', '_')}.json").write_text(
             json.dumps({str(s): {k: v for k, v in r.items() if k != "ms"} for s, r in zip(seeds, results)}, ensure_ascii=False, indent=1), encoding="utf-8")

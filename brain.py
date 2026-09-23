@@ -238,11 +238,11 @@ class RuleBrain:
             a = "equip"
         elif "eat" in valid and g.hunger_word() != "fine":
             a = "eat"
-        elif not awake and "read_identify" in valid:
+        elif not mons and "read_identify" in valid:
             a = "read_identify"
-        elif not awake and hp != "critical" and "quaff_unknown" in valid:
+        elif not mons and hp != "critical" and "quaff_unknown" in valid:
             a = "quaff_unknown"
-        elif not awake and "read_unknown" in valid:
+        elif not mons and "read_unknown" in valid:
             a = "read_unknown"
         elif "attack" in valid and any((m["awake"] or "M" in m["flags"]) and g._adjacent(m) for m in mons):
             a = "flee" if hp == "critical" and "flee" in valid and "quaff_heal" not in valid and deadly else "attack"
@@ -284,11 +284,11 @@ class DiverBrain:
             a = "equip"
         elif not awake and "read_map" in valid:
             a = "read_map"
-        elif not awake and "read_identify" in valid:
+        elif not mons and "read_identify" in valid:
             a = "read_identify"
-        elif not awake and hp != "critical" and "quaff_unknown" in valid:
+        elif not mons and hp != "critical" and "quaff_unknown" in valid:
             a = "quaff_unknown"
-        elif not awake and "read_unknown" in valid:
+        elif not mons and "read_unknown" in valid:  # 眠った敵が見えているときは読まない (怪物寄せで起こす)
             a = "read_unknown"
         elif "attack" in valid:
             a = "attack"
