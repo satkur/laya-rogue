@@ -6,8 +6,9 @@
 
 第 2 段階で実装していないもの (NOTES.md に一覧): 指輪・杖・未識別、巻物のうち識別系・解呪・眠り・召喚・恐怖・拘束・混乱・食料探知、
 迷路部屋、ドラゴンの炎、ファントムの透明化、ゼロックの擬態、呪い、26 階の魔除け。
-隠し扉は本家どおり 3 階以降に出る (扉ごとに rnd(10) + 1 < 階 かつ 1/5)。壁に見え、隣で捜索すると 1 回につき 1/5 で見つかる。
-「捜索」は 1 手で、行き止まりの通路の先と部屋の壁沿いを順に歩いて探す (どこを探すかはプログラムが決める)。
+隠し扉と「捜索」は実装してあるが切ってある (rogue_data.HIDDEN_DOORS)。入れると本家どおり 3 階以降に出る (扉ごとに rnd(10) + 1 < 階 かつ 1/5)。
+壁に見え、隣で捜索すると 1 回につき 1/5 で見つかる。「捜索」は 1 手で、行き止まりの通路の先と部屋の壁沿いを順に歩いて探す。
+判断が生まれず、成績と見た目を損ねるだけだったので外した (NOTES.md 9 章)。
 罠は本家の 7 種 (落とし穴・熊の罠・眠りガス・矢・転移・毒ダーツ・錆び) を出現数と効果の数値ごと入れてある。踏むまで見えず、踏んだ罠は以後よける。
 飛び道具は本家と違って弓を「構える」必要がなく、持っていれば矢に弓の威力が乗る (装備の持ち替えという操作を省いた)。
 強化・保護の巻物は拾った時点で読む (正体が分かっていて読めば必ず得なので、判断の余地がない)。
@@ -143,7 +144,7 @@ class Game:
                 break
         for y in range(H):  # 隠し扉 (rooms.c の door)。つながっていることを確かめたあとで隠す
             for x in range(W):
-                if self.tiles[y][x] == DOOR and self.rnd(10) + 1 < self.depth and self.rnd(5) == 0:
+                if D.HIDDEN_DOORS and self.tiles[y][x] == DOOR and self.rnd(10) + 1 < self.depth and self.rnd(5) == 0:
                     self.tiles[y][x] = SDOOR
         self._populate()
 
@@ -787,7 +788,7 @@ class Game:
             v.append("equip")
         if free and self._explore_step():
             v.append("explore")
-        elif free and not self.stairs_known() and self._search_target() is not None:
+        elif D.HIDDEN_DOORS and free and not self.stairs_known() and self._search_target() is not None:
             v.append("search")
         if free and self.stairs_known():
             v.append("descend")
