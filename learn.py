@@ -27,13 +27,16 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-from brain import TAU, coarse_key, describe
+from brain import TAU, coarse_key, describe, hp_word
 from game import Game, avg_dice
 
 DATA = Path(__file__).parent / "data"
 HORIZON = 40        # 先読みするターン数
 ROLLOUTS = 3        # 1 行動あたりの先読み回数
 P_EVAL = 0.05       # 通過した局面のうち、先読みで調べる割合
+P_EVAL_RARE = 0.5   # 稀な判断 (薬・巻物を使う、危険な場面で未識別を試す) が選べる局面は、この割合で調べる。
+                    # 5% のままだと経験表の重みが 4 に届かず、回復薬や転移の使い方を判断ヘッドに教えていなかった (NOTES.md 11 章)
+RARE_ACTIONS = {"quaff_heal", "quaff_str", "read_map", "read_teleport", "read_identify"}
 MAX_TURNS = 3000
 EPSILON = 0.15      # 表を無視して気まぐれに動く確率 (知らない局面に出会うため)
 DECAY = 0.5         # ラウンドをまたぐとき、古い経験の重みをこれだけ残す
@@ -46,8 +49,9 @@ POOL_PER_DEPTH = 300
 # 何が嬉しいか。命令ごとに分けていたが、効きが弱かったのでいったん 1 本にしてある (NOTES.md)
 # 巻物の価値は「転移を持っている」ことにだけ付ける。強化の巻物は拾った時点で読まれて装備 (gear) の得点になる。地図は持っていても
 # 点にしない (持つことに点を付けると読むと損になり、1 回目の学習で地図を読む率が 1〜2% になった)
+# 未識別の薬・巻物は 1 つ 0.5 (拾う価値はあるが、正体の分かった回復薬 2.5 より低い。試して当たれば得、外れれば損は効果そのものから)
 WANTS = dict(depth=10, level=5, kills=0.5, gold=0.01, hp=5, heal=2.5, food=3, fed=6, gear=1.5, explored=0.006, death=50,
-             missile=0.1, scroll=0.5)
+             missile=0.1, scroll=0.5, unknown=0.5)
 TACTICAL_SCROLLS = ("teleportation",)
 
 
@@ -56,10 +60,11 @@ def score(g):
     gear = ((10 - g.armor["ac"]) + (1 if g.armor.get("protected") else 0) + avg_dice(g.weapon["dice"])
             + g.weapon["dplus"] + 0.5 * g.weapon["hplus"])
     return (w["depth"] * g.depth + w["level"] * g.level + w["kills"] * g.kills + w["gold"] * g.gold
-            + w["hp"] * g.hp / g.max_hp + w["heal"] * g.has_heal() + w["food"] * min(g.food, 3)
+            + w["hp"] * g.hp / max(1, g.max_hp) + w["heal"] * g.has_heal() + w["food"] * min(g.food, 3)
             + w["fed"] * max(0, min(g.food_left, 1300)) / 1300 + w["gear"] * gear + 1.5 * g.str
             + w["explored"] * g.explored + w["missile"] * min(30, sum(g.missiles.values()))
-            + w["scroll"] * sum(g.scrolls.get(n, 0) for n in TACTICAL_SCROLLS)
+            + w["scroll"] * sum(g.scrolls.get(n, 0) for n in TACTICAL_SCROLLS if n in g.known)
+            + w["unknown"] * (sum(g.unknown_potions().values()) + sum(g.unknown_scrolls().values()))
             + (100 if g.won else 0) - (w["death"] if g.dead else 0))
 
 
@@ -132,7 +137,10 @@ def episode(args):
         turns += 1
         valid = g.valid_actions()
         key = coarse_key(g, valid)
-        if len(valid) > 1 and rng.random() < P_EVAL:
+        gamble = ("quaff_unknown" in valid or "read_unknown" in valid) and (
+            hp_word(g) in ("low", "critical") or any(m["awake"] for m in g.visible_monsters()))
+        p_eval = P_EVAL_RARE if (RARE_ACTIONS & set(valid) or gamble) else P_EVAL
+        if len(valid) > 1 and rng.random() < p_eval:
             # 行動どうしの比較では同じ乱数列を使う。「運の差」が消えて「行動の差」だけが残る
             seeds = [rng.random() for _ in range(ROLLOUTS)]
             out.append((key, describe(g, valid), {a: sum(rollout(g, a, _table, _v_default, s) for s in seeds) / ROLLOUTS for a in valid}))
