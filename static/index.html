@@ -146,6 +146,8 @@
         <div class="cell"><div class="v" id="scrolls">0</div><div class="k">巻物</div></div>
         <div class="cell"><div class="v" id="unkp">0</div><div class="k">未識別の薬</div></div>
         <div class="cell"><div class="v" id="unks">0</div><div class="k">未識別の巻物</div></div>
+        <div class="cell"><div class="v" id="wands">0</div><div class="k">杖 (残り回数)</div></div>
+        <div class="cell"><div class="v" id="unkw">0</div><div class="k">未識別の杖</div></div>
       </div>
     </fieldset>
     <fieldset>
@@ -183,7 +185,8 @@
 const $ = id => document.getElementById(id);
 const JP = { attack: "攻撃", throw: "投擲", approach: "接近", flee: "逃走", quaff_heal: "回復薬", quaff_str: "力の薬",
              read_map: "地図の巻物", read_teleport: "転移の巻物", quaff_unknown: "未識別の薬", read_unknown: "未識別の巻物",
-             read_identify: "識別の巻物", eat: "食事", pick_up: "回収",
+             read_identify: "識別の巻物", zap_attack: "攻撃の杖", zap_slow: "鈍足の杖", zap_away: "追放の杖", zap_unknown: "未識別の杖",
+             eat: "食事", pick_up: "回収",
              equip: "装備", explore: "探索", search: "捜索", descend: "階段へ", rest: "待機" };
 const HUNGER_JP = { fine: "十分", hungry: "空腹", weak: "衰弱", fainting: "飢餓" };
 const WEAPON_JP = { mace: "メイス", "long sword": "長剣", "two handed sword": "両手剣", spear: "槍", dagger: "短剣" };
@@ -374,6 +377,7 @@ setInterval(() => {                       // パネルは 10Hz。毎フレーム
   $("weapon").textContent = WEAPON_JP[h.weapon] ?? h.weapon; $("armor").textContent = ARMOR_JP[h.armor] ?? h.armor;
   $("missiles").textContent = h.missiles + (h.bow ? "" : " (弓なし)"); $("scrolls").textContent = h.scrolls;
   $("unkp").textContent = h.unknown_potions ?? 0; $("unks").textContent = h.unknown_scrolls ?? 0;
+  $("wands").textContent = h.wands ?? 0; $("unkw").textContent = h.unknown_wands ?? 0;
   const sc = scoreOf(h);
   if (sc > hiscore) { hiscore = sc; try { localStorage.setItem("laya-rogue-hiscore", hiscore); } catch {} }
   $("score").textContent = sc; $("hiscore").textContent = hiscore;
