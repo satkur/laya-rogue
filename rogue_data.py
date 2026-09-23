@@ -77,11 +77,21 @@ INIT_ARMOR = ("ring mail", 7 - 1)        # 名前, 防御 (+1 の ring mail)
 # 落ちている物の種類の比率 (extern.c の things)
 THING_PROBS = [("potion", 26), ("scroll", 36), ("food", 16), ("weapon", 7), ("armor", 7), ("ring", 4), ("stick", 4)]
 
-# 薬 (pot_info の出現率)。第 1 段階は未識別の仕組みがないので、実装するのは ★ の 4 種だけ
+# 薬 (pot_info の出現率)。実装しているのは POTIONS_IN_PLAY の 6 種 (残りを引いたときは何も出ない = 本家より物資が少ない)
 POTION_PROBS = [("confusion", 7), ("hallucination", 8), ("poison", 8), ("gain strength", 13), ("see invisible", 3),
                 ("healing", 13), ("monster detection", 6), ("magic detection", 6), ("raise level", 2),
                 ("extra healing", 5), ("haste self", 5), ("restore strength", 13), ("blindness", 5), ("levitation", 6)]
-STAGE1_POTIONS = {"healing", "extra healing", "gain strength", "restore strength"}
+POTIONS_IN_PLAY = {"healing", "extra healing", "gain strength", "restore strength", "poison", "confusion"}
+BAD_POTIONS = {"poison", "confusion"}   # 正体が分かったら捨てる (本家でも使い道がない)
+POTION_JP = {"healing": "回復", "extra healing": "大回復", "gain strength": "力", "restore strength": "力の回復", "poison": "毒", "confusion": "混乱"}
+HUHDURATION = 20                        # 混乱の薬: rnd(8) + 20 ターン (potions.c)
+# 未識別のあいだの薬の色 (extern.c の rainbow)。ゲームごとに種類へ割り当てる。表示にだけ使い、Laya には見せない
+POTION_COLORS = ["琥珀", "藍", "黒", "青", "茶", "透明", "深紅", "水", "生成", "金", "緑", "灰", "赤紫", "橙", "桃", "梅", "紫", "赤", "銀",
+                 "黄土", "蜜柑", "黄玉", "青緑", "朱", "菫", "白", "黄"]
+# 巻物の題名の音節 (init.c の sylls から)。2〜3 個つないで題名にする
+SCROLL_SYLLABLES = ["blech", "foo", "barf", "rech", "bar", "blech", "quo", "bloto", "oh", "caca", "blorp", "erp", "festr", "rot", "slie",
+                    "snorf", "iky", "yuky", "ooze", "ah", "bahl", "zep", "druhl", "flem", "behil", "arek", "mep", "zihr", "grit", "kona",
+                    "kini", "ichi", "tims", "ogr", "oo", "ighr", "coph", "swerr", "mihr", "poxi", "nuxi", "mun", "toxi"]
 
 # 武器 (weap_info の出現率と weapons.c のダメージ): (名前, 出現率, 振り回し, 投げたとき, 射出する武器)
 WEAPONS = [("mace", 11, "2x4", "1x3", None), ("long sword", 11, "3x4", "1x2", None), ("short bow", 12, "1x1", "1x1", None),
@@ -91,13 +101,17 @@ MISSILES = {"arrow", "dart", "shuriken", "dagger", "spear"}   # 投げる物と�
 STACKED = {"arrow", "dart", "shuriken"}                        # まとまって落ちている (rnd(8) + 8 本)
 INIT_ARROWS = (25, 15)                                        # 初期装備の矢: 25 + rnd(15) 本 (init.c)。弓も持って始まる
 
-# 巻物 (scr_info の出現率)。第 2 段階は未識別の仕組みがないので、読んで意味のある ★ の 5 種だけ出る
-# (識別系 43、解呪 7 は効果の対象がまだ無い。眠り・怪物召喚・怪物寄せ・混乱・拘束・恐怖・食料探知は未実装)
+# 巻物 (scr_info の出現率)。実装しているのは SCROLLS_IN_PLAY の 9 種 (解呪・混乱・拘束・恐怖・食料探知は判断ボードでオミット)
 SCROLL_PROBS = [("monster confusion", 7), ("magic mapping", 4), ("hold monster", 2), ("sleep", 3), ("enchant armor", 7),
                 ("identify potion", 10), ("identify scroll", 10), ("identify weapon", 6), ("identify armor", 7),
                 ("identify ring, wand or staff", 10), ("scare monster", 3), ("food detection", 2), ("teleportation", 5),
                 ("enchant weapon", 8), ("create monster", 4), ("remove curse", 7), ("aggravate monsters", 3), ("protect armor", 2)]
-STAGE2_SCROLLS = {"enchant armor", "enchant weapon", "protect armor", "magic mapping", "teleportation"}
+# 未識別 (簡略版): 使えば正体が分かる。識別の巻物は本家の 5 種 (薬・巻物・武器・鎧・指輪杖) を 1 種にまとめ、出現率は合算 (43)
+SCROLLS_IN_PLAY = {"enchant armor", "enchant weapon", "protect armor", "magic mapping", "teleportation", "identify",
+                   "sleep", "create monster", "aggravate monsters"}
+BAD_SCROLLS = {"sleep", "create monster", "aggravate monsters"}
+SCROLL_JP = {"enchant armor": "鎧強化", "enchant weapon": "武器強化", "protect armor": "鎧保護", "magic mapping": "魔法の地図",
+             "teleportation": "瞬間移動", "identify": "識別", "sleep": "眠り", "create monster": "怪物召喚", "aggravate monsters": "怪物寄せ"}
 ENCHANT_SCROLLS = ("enchant armor", "enchant weapon", "protect armor")   # 読めば必ず得をする巻物 (拾った時点で読む)
 
 # 防具 (arm_info の出現率と a_class の防御。防御は小さいほど硬い)

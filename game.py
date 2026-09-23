@@ -1,11 +1,14 @@
-"""本家 Rogue 5.4.4 のルールに基づくターン制ローグライク (第 2 段階: 戦闘と生存 + 巻物と飛び道具)。描画も AI も持たない。
+"""本家 Rogue 5.4.4 のルールに基づくターン制ローグライク (第 3 段階: 戦闘と生存 + 巻物と飛び道具 + 罠 + 未識別)。描画も AI も持たない。
 
 数値と規則は Rogue 5.4.4 を参照した独自実装 (rogue_data.py と THIRD_PARTY_NOTICES.md)。
 勇者の 1 ターンは「高レベル行動」(ACTIONS) を 1 つ選ぶこと。どのマスへ動くかといった幾何の計算は
 ここで行い、「今なにをすべきか」の判断だけを外 (Laya) に委ねる。
 
-第 2 段階で実装していないもの (NOTES.md に一覧): 指輪・杖・未識別、巻物のうち識別系・解呪・眠り・召喚・恐怖・拘束・混乱・食料探知、
+実装していないもの (NOTES.md 10 章の判断ボード): 指輪 (後回し)、杖 (次)、巻物のうち解呪・恐怖・拘束・混乱・食料探知、
 迷路部屋、ドラゴンの炎、ファントムの透明化、ゼロックの擬態、呪い、26 階の魔除け。
+未識別は簡略版: 薬と巻物は使うまで正体が分からず (色と題名だけ)、使えば以後ずっと分かる。識別の巻物は 1 種で、持っている未識別の
+1 種類の正体を教える。正体が分かった有害な物 (毒・混乱・眠り・怪物召喚・怪物寄せ) は拾わず、持っていた残りも捨てる。
+どの未識別の物を試すかはプログラムが決める (多く持っている種類から)。「試すか、持ったままにするか」だけが判断。
 隠し扉と「捜索」は実装してあるが切ってある (rogue_data.HIDDEN_DOORS)。入れると本家どおり 3 階以降に出る (扉ごとに rnd(10) + 1 < 階 かつ 1/5)。
 壁に見え、隣で捜索すると 1 回につき 1/5 で見つかる。「捜索」は 1 手で、行き止まりの通路の先と部屋の壁沿いを順に歩いて探す。
 判断が生まれず、成績と見た目を損ねるだけだったので外した (NOTES.md 9 章)。
@@ -27,6 +30,7 @@ VS_POISON, VS_MAGIC = 0, 3
 LAMP_DIST = 3
 
 ACTIONS = ["attack", "throw", "approach", "flee", "quaff_heal", "quaff_str", "read_map", "read_teleport",
+           "quaff_unknown", "read_unknown", "read_identify",
            "eat", "pick_up", "equip", "explore", "search", "descend", "rest"]
 
 
@@ -39,7 +43,7 @@ def avg_dice(dice):
 
 
 HERO_FIELDS = ("kills", "gold", "level", "exp", "str", "max_str", "hp", "max_hp", "food_left", "food", "potions",
-               "weapon", "armor", "gear", "no_food", "missiles", "scrolls", "bow")
+               "weapon", "armor", "gear", "no_food", "missiles", "scrolls", "bow", "known")
 
 
 class Game:
@@ -63,6 +67,8 @@ class Game:
         self.bow = True                         # 弓を持っているか (初期装備)。持っていれば矢に弓の威力が乗る
         self.missiles = {"arrow": D.INIT_ARROWS[0] + self.rnd(D.INIT_ARROWS[1])}  # 投げる物: 名前 -> 本数
         self.scrolls = {}                       # 巻物: 名前 -> 枚数
+        self.known = set()                      # 正体の分かった薬と巻物の種類 (未識別の仕組み。使えば分かる)
+        self.names = self._item_names(seed)     # 未識別のあいだの見た目 (薬の色、巻物の題名)。表示にだけ使う
         self.no_command = 0                     # 凍結・気絶で動けない残りターン
         self.no_move = 0                        # 熊の罠で歩けない残りターン (攻撃や薬は使える)
         self._fell = False                      # 落とし穴で階を降りた直後 (その手はモンスターが動かない)
@@ -86,6 +92,21 @@ class Game:
 
     def hero_state(self):
         return {"depth": self.depth, **{k: copy.deepcopy(getattr(self, k)) for k in HERO_FIELDS}}
+
+    @staticmethod
+    def _item_names(seed):
+        """薬の色と巻物の題名をゲームごとに割り当てる (本家の rainbow と sylls)。本編の乱数列は消費しない (同じシードなら同じ地図のまま)。"""
+        r = random.Random(seed)
+        names = dict(zip(sorted(D.POTIONS_IN_PLAY), r.sample(D.POTION_COLORS, len(D.POTIONS_IN_PLAY))))
+        for kind in sorted(D.SCROLLS_IN_PLAY):
+            names[kind] = " ".join(r.choice(D.SCROLL_SYLLABLES) for _ in range(r.randrange(2, 4)))
+        return names
+
+    def label(self, kind):
+        """薬・巻物の呼び名。正体が分かっていれば種類名、まだなら色か題名。"""
+        if kind in D.POTIONS_IN_PLAY:
+            return f"{D.POTION_JP[kind]}の薬" if kind in self.known else f"{self.names[kind]}色の薬"
+        return f"{D.SCROLL_JP[kind]}の巻物" if kind in self.known else f"「{self.names[kind]}」の巻物"
 
     # ------------------------------------------------------------------ 乱数 (本家と同じ語彙)
     def rnd(self, n):
@@ -118,6 +139,7 @@ class Game:
         c.traps = [dict(t) for t in self.traps]
         c.items = [dict(i) for i in self.items]
         c.potions = dict(self.potions)
+        c.known = set(self.known)
         c.missiles, c.scrolls = dict(self.missiles), dict(self.scrolls)
         c.weapon, c.armor = dict(self.weapon), dict(self.armor)
         c.gear = [dict(x) for x in self.gear]
@@ -329,10 +351,12 @@ class Game:
             return dict(kind="food")
         if kind == "potion":
             name = self._pick(D.POTION_PROBS)[0]
-            return dict(kind="potion", name=name) if name in D.STAGE1_POTIONS else None
+            return dict(kind="potion", name=name) if name in D.POTIONS_IN_PLAY else None
         if kind == "scroll":
             name = self._pick(D.SCROLL_PROBS)[0]
-            return dict(kind="scroll", name=name) if name in D.STAGE2_SCROLLS else None
+            if name.startswith("identify"):  # 本家の識別 5 種を 1 種にまとめる
+                name = "identify"
+            return dict(kind="scroll", name=name) if name in D.SCROLLS_IN_PLAY else None
         if kind == "weapon":
             name, _, dmg, hurl, launcher = self._pick(D.WEAPONS)
             if name == "short bow":
@@ -751,10 +775,69 @@ class Game:
         return best[1] if best else None
 
     def has_heal(self):
-        return self.potions.get("extra healing", 0) + self.potions.get("healing", 0)
+        """正体の分かっている回復薬の数。未識別の物は数えない (飲んでみるまで何か分からない)。"""
+        return sum(self.potions.get(k, 0) for k in ("extra healing", "healing") if k in self.known)
 
     def has_str_potion(self):
-        return self.potions.get("gain strength", 0) + (self.potions.get("restore strength", 0) if self.str < self.max_str else 0)
+        n = self.potions.get("gain strength", 0) if "gain strength" in self.known else 0
+        if "restore strength" in self.known and self.str < self.max_str:
+            n += self.potions.get("restore strength", 0)
+        return n
+
+    # ------------------------------------------------------------------ 未識別 (簡略版)
+    def unknown_potions(self):
+        return {k: n for k, n in self.potions.items() if n > 0 and k not in self.known}
+
+    def unknown_scrolls(self):
+        return {k: n for k, n in self.scrolls.items() if n > 0 and k not in self.known}
+
+    @staticmethod
+    def _unknown_pick(bag):
+        """未識別の物のうちどれを試すか: 多く持っている種類から (同数なら名前順。名前は Laya には見えない)。"""
+        return max(sorted(bag), key=bag.get)
+
+    def _learn(self, kind):
+        """正体が分かった。有害と分かった残りは捨てる (本家でも使い道がない)。"""
+        if kind in self.known:
+            return
+        potion = kind in D.POTIONS_IN_PLAY
+        before = self.label(kind)
+        self.known.add(kind)
+        self.say(f"{before}は{self.label(kind)}だった")
+        bag = self.potions if potion else self.scrolls
+        if kind in (D.BAD_POTIONS | D.BAD_SCROLLS) and bag.get(kind, 0) > 0:
+            self.say(f"残りの{self.label(kind)}を捨てた")
+            del bag[kind]
+
+    def _quaff(self, kind):
+        """薬を 1 つ飲む (potions.c)。正体が分かっていてもいなくても効果は同じで、飲めば分かる。"""
+        self.potions[kind] -= 1
+        if self.potions[kind] <= 0:
+            del self.potions[kind]
+        if kind in ("healing", "extra healing"):
+            self.hp += self.roll(self.level, 8 if kind == "extra healing" else 4)
+            if self.hp > self.max_hp:
+                if kind == "extra healing" and self.hp > self.max_hp + self.level + 1:
+                    self.max_hp += 1
+                self.max_hp += 1
+                self.hp = self.max_hp
+            if kind == "extra healing":
+                self.confused = 0
+            self.say("体力が回復した")
+        elif kind == "restore strength":
+            self.str = self.max_str
+            self.say("力が戻った")
+        elif kind == "gain strength":
+            self.str = min(31, self.str + 1)
+            self.max_str = max(self.max_str, self.str)
+            self.say("力が強くなった")
+        elif kind == "poison":
+            self.str = max(3, self.str - (self.rnd(3) + 1))  # chg_str(-(rnd(3) + 1))。最大値は下がらないので力の回復で戻る
+            self.say("気分が悪くなった (毒)")
+        elif kind == "confusion":
+            self.confused += self.rnd(8) + D.HUHDURATION
+            self.say("目が回る (混乱)")
+        self._learn(kind)
 
     def valid_actions(self):
         if self.no_command > 0:
@@ -776,10 +859,16 @@ class Game:
             v.append("quaff_heal")
         if self.has_str_potion():
             v.append("quaff_str")
-        if self.scrolls.get("magic mapping") and not self.stairs_known():
+        if self.scrolls.get("magic mapping") and "magic mapping" in self.known and not self.stairs_known():
             v.append("read_map")
-        if self.scrolls.get("teleportation") and awake:
+        if self.scrolls.get("teleportation") and "teleportation" in self.known and awake:
             v.append("read_teleport")
+        if self.unknown_potions():
+            v.append("quaff_unknown")
+        if self.unknown_scrolls():
+            v.append("read_unknown")
+        if self.scrolls.get("identify") and "identify" in self.known and (self.unknown_potions() or self.unknown_scrolls()):
+            v.append("read_identify")
         if self.food and self.food_left < 1000:
             v.append("eat")
         if free and self.visible_items():
@@ -887,6 +976,29 @@ class Game:
         elif name == "teleportation":
             self._teleport()
             self.say("別の場所に飛ばされた")
+        elif name == "identify":
+            self._learn("identify")
+            unknown = {**self.unknown_potions(), **self.unknown_scrolls()}
+            if unknown:
+                self._learn(self._unknown_pick(unknown))
+            else:
+                self.say("識別の巻物だったが、調べる物がなかった")
+        elif name == "sleep":
+            self.no_command += self.rnd(4) + 4  # rnd(SLEEPTIME) + 4
+            self.say("眠気に襲われた (眠り)")
+        elif name == "create monster":
+            free = [c for c in self._nb8[(self.hx, self.hy)] if self.tiles[c[1]][c[0]] in PASSABLE and not self._monster_at(*c)]
+            if free:
+                x, y = self.rng.choice(free)
+                self._spawn(self._rand_monster(False), x, y, awake=True)
+                self.say(f"{self.monsters[-1]['jp']}が現れた (怪物召喚)")
+            else:
+                self.say("何も起きなかった (怪物召喚)")
+        elif name == "aggravate monsters":
+            for m in self.monsters:
+                m["awake"] = True
+            self.say("高い音が響き、怪物たちが目を覚ました (怪物寄せ)")
+        self._learn(name)
 
     def _adjacent(self, m):
         return (m["x"], m["y"]) in self._nbr[(self.hx, self.hy)]
@@ -946,26 +1058,24 @@ class Game:
         elif action == "quaff_heal" and self.has_heal():
             # 体力が大きく減っていれば強い薬から、少しなら弱い薬から
             order = ["extra healing", "healing"] if self.hp <= self.max_hp // 2 else ["healing", "extra healing"]
-            kind = next(k for k in order if self.potions.get(k, 0))
-            self.potions[kind] -= 1
-            self.hp += self.roll(self.level, 8 if kind == "extra healing" else 4)
-            if self.hp > self.max_hp:
-                if kind == "extra healing" and self.hp > self.max_hp + self.level + 1:
-                    self.max_hp += 1
-                self.max_hp += 1
-                self.hp = self.max_hp
-            self.confused = 0 if kind == "extra healing" else self.confused
-            self.say("回復薬を飲んだ")
+            kind = next(k for k in order if self.potions.get(k, 0) and k in self.known)
+            self.say(f"{self.label(kind)}を飲んだ")
+            self._quaff(kind)
         elif action == "quaff_str" and self.has_str_potion():
-            if self.potions.get("restore strength", 0) and self.str < self.max_str:
-                self.potions["restore strength"] -= 1
-                self.str = self.max_str
-                self.say("力が戻った")
-            else:
-                self.potions["gain strength"] -= 1
-                self.str = min(31, self.str + 1)
-                self.max_str = max(self.max_str, self.str)
-                self.say("力が強くなった")
+            restore = "restore strength" in self.known and self.potions.get("restore strength", 0) and self.str < self.max_str
+            kind = "restore strength" if restore else "gain strength"
+            self.say(f"{self.label(kind)}を飲んだ")
+            self._quaff(kind)
+        elif action == "quaff_unknown" and self.unknown_potions():
+            kind = self._unknown_pick(self.unknown_potions())
+            self.say(f"{self.label(kind)}を飲んでみた")
+            self._quaff(kind)
+        elif action == "read_unknown" and self.unknown_scrolls():
+            kind = self._unknown_pick(self.unknown_scrolls())
+            self.say(f"{self.label(kind)}を読んでみた")
+            self._read(kind)
+        elif action == "read_identify" and self.scrolls.get("identify") and "identify" in self.known:
+            self._read("identify")
         elif action == "eat" and self.food:
             self.food -= 1
             self.food_left = min(D.STOMACH_SIZE, max(0, self.food_left) + D.HUNGER_TIME - 200 + self.rnd(400))
@@ -1004,13 +1114,21 @@ class Game:
                 self.food += 1
                 self.say("食料を拾った")
             elif it["kind"] == "potion":
-                self.potions[it["name"]] = self.potions.get(it["name"], 0) + 1
-                self.say(f"薬 ({it['name']}) を拾った")
+                k = it["name"]
+                if k in self.known and k in D.BAD_POTIONS:
+                    self.say(f"{self.label(k)}は使い道がないので捨てた")
+                else:
+                    self.potions[k] = self.potions.get(k, 0) + 1
+                    self.say(f"{self.label(k)}を拾った")
             elif it["kind"] == "scroll":
-                self.scrolls[it["name"]] = self.scrolls.get(it["name"], 0) + 1
-                self.say(f"巻物 ({it['name']}) を拾った")
-                if it["name"] in D.ENCHANT_SCROLLS:  # 読めば必ず得で判断の余地がないので、拾った時点で読む (未識別を入れるまでの簡略化)
-                    self._read(it["name"])
+                k = it["name"]
+                if k in self.known and k in D.BAD_SCROLLS:
+                    self.say(f"{self.label(k)}は使い道がないので捨てた")
+                else:
+                    self.scrolls[k] = self.scrolls.get(k, 0) + 1
+                    self.say(f"{self.label(k)}を拾った")
+                    if k in self.known and k in D.ENCHANT_SCROLLS:  # 正体が分かっていて読めば必ず得なので、拾った時点で読む
+                        self._read(k)
             elif it["kind"] == "missile":
                 self.missiles[it["name"]] = self.missiles.get(it["name"], 0) + it["count"]
                 self.say(f"{it['name']} を {it['count']} 拾った")

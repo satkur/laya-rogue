@@ -28,6 +28,9 @@ ACTION_DESC = {
     "quaff_str": "Drink a strength potion.",
     "read_map": "Read the scroll of magic mapping.",
     "read_teleport": "Read the scroll of teleportation.",
+    "quaff_unknown": "Drink an unidentified potion; you learn what it was.",
+    "read_unknown": "Read an unidentified scroll; you learn what it was.",
+    "read_identify": "Read the scroll of identify to learn what one unidentified potion or scroll you carry is.",
     "eat": "Eat food.",
     "pick_up": "Walk to the nearest item.",
     "equip": "Put on the better weapon or armor you carry.",
@@ -61,7 +64,8 @@ def count_word(n):
 
 
 def scroll_words(g):
-    kinds = [w for w, name in (("map", "magic mapping"), ("teleport", "teleportation")) if g.scrolls.get(name)]
+    kinds = [w for w, name in (("map", "magic mapping"), ("teleport", "teleportation"), ("identify", "identify"))
+             if g.scrolls.get(name) and name in g.known]
     return ", ".join(kinds) if kinds else "none"
 
 
@@ -85,7 +89,9 @@ def describe(g, valid):
     items = g.visible_items()
     parts = [f"Depth: {depth_word(g.depth)}.", f"HP {hp_word(g)}.", f"Hunger: {g.hunger_word()}.",
              f"Food: {count_word(g.food)}.", f"Healing potions: {count_word(g.has_heal())}.",
-             f"Missiles: {count_word(sum(g.missiles.values()))}.", f"Scrolls: {scroll_words(g)}."]
+             f"Missiles: {count_word(sum(g.missiles.values()))}.", f"Scrolls: {scroll_words(g)}.",
+             f"Unidentified potions: {count_word(sum(g.unknown_potions().values()))}.",
+             f"Unidentified scrolls: {count_word(sum(g.unknown_scrolls().values()))}."]
     status = [w for w, on in (("confused", g.confused), ("held", g.held_by is not None), ("weakened", g.str < g.max_str)) if on]
     if status:
         parts.append("Status: " + ", ".join(status) + ".")
@@ -232,6 +238,12 @@ class RuleBrain:
             a = "equip"
         elif "eat" in valid and g.hunger_word() != "fine":
             a = "eat"
+        elif not awake and "read_identify" in valid:
+            a = "read_identify"
+        elif not awake and hp != "critical" and "quaff_unknown" in valid:
+            a = "quaff_unknown"
+        elif not awake and "read_unknown" in valid:
+            a = "read_unknown"
         elif "attack" in valid and any((m["awake"] or "M" in m["flags"]) and g._adjacent(m) for m in mons):
             a = "flee" if hp == "critical" and "flee" in valid and "quaff_heal" not in valid and deadly else "attack"
         elif "throw" in valid:
@@ -272,6 +284,12 @@ class DiverBrain:
             a = "equip"
         elif not awake and "read_map" in valid:
             a = "read_map"
+        elif not awake and "read_identify" in valid:
+            a = "read_identify"
+        elif not awake and hp != "critical" and "quaff_unknown" in valid:
+            a = "quaff_unknown"
+        elif not awake and "read_unknown" in valid:
+            a = "read_unknown"
         elif "attack" in valid:
             a = "attack"
         elif "throw" in valid:

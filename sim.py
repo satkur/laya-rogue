@@ -33,8 +33,10 @@ def split_spec(spec):
 
 
 def split_llm(spec):
+    from strategist import DEFAULT_MODEL
+
     spec, plus, llm = spec.partition("+llm")
-    return spec, (llm[1:] or "opus") if plus else None
+    return spec, (llm[1:] or DEFAULT_MODEL) if plus else None
 
 
 class Locked:

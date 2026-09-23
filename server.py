@@ -18,12 +18,12 @@ from fastapi.responses import FileResponse
 from brain import WEIGHTS, LayaBrain
 from game import H, W, Game
 import strategist as strategist_mod
-from strategist import Masked, Strategist
+from strategist import DEFAULT_MODEL, Masked, Strategist
 
 HOST, PORT = "127.0.0.1", 8766
 STATIC = Path(__file__).parent / "static"
 brain = None
-LLM_MODEL = sys.argv[sys.argv.index("--llm-model") + 1] if "--llm-model" in sys.argv else "opus"
+LLM_MODEL = sys.argv[sys.argv.index("--llm-model") + 1] if "--llm-model" in sys.argv else DEFAULT_MODEL
 adviser = Strategist(model=LLM_MODEL, enabled="--llm" in sys.argv)  # いまは付けると成績が下がるので既定は切 (NOTES.md 6 章)
 strategist_mod.MAX_CALLS_TOTAL = 300  # 画面を開きっぱなしにしても、ここで方針役は自動で止まる (画面で入れ直すと再開)
 
@@ -70,7 +70,8 @@ def frame(g, d, log_from):
         "hero": {"x": g.hx, "y": g.hy, "hp": g.hp, "max_hp": g.max_hp, "level": g.level, "str": g.str, "max_str": g.max_str,
                  "ac": g.armor["ac"], "weapon": g.weapon["name"], "armor": g.armor["name"], "food": g.food,
                  "hunger": g.hunger_word(), "heal": g.has_heal(), "gold": g.gold, "kills": g.kills, "depth": g.depth,
-                 "missiles": sum(g.missiles.values()), "scrolls": sum(g.scrolls.values()), "bow": g.bow,
+                 "missiles": sum(g.missiles.values()), "scrolls": sum(c for k, c in g.scrolls.items() if k in g.known), "bow": g.bow,
+                 "unknown_potions": sum(g.unknown_potions().values()), "unknown_scrolls": sum(g.unknown_scrolls().values()),
                  "status": [w for w, on in (("混乱", g.confused), ("拘束", g.held_by is not None), ("足止め", g.no_move), ("行動不能", g.no_command)) if on]},
         "monsters": [{"id": m["id"], "ch": m["ch"], "x": m["x"], "y": m["y"], "hp": m["hp"], "max_hp": m["max_hp"], "awake": m["awake"]}
                      for m in g.visible_monsters()],
