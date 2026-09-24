@@ -27,16 +27,19 @@ DIFFICULTIES = {
         hidden_doors=False,      # 隠し扉と「捜索」(NOTES.md 9〜10 章: 判断が生まれず成績と見た目を損ねるだけだった)
         potions_out={"blindness", "hallucination"},   # 850 ターンは長すぎる (判断ボードの回答)。引いたときは何も出ない
         treasure_rooms=True,
+        dragon_flame=True,
     ),
     "hard": dict(
         hidden_doors=True,
         potions_out=set(),
         treasure_rooms=True,
+        dragon_flame=True,
     ),
     "original": dict(
         hidden_doors=True,
         potions_out=set(),
         treasure_rooms=True,
+        dragon_flame=True,
     ),
 }
 
@@ -185,16 +188,27 @@ RING_WORTH = {"regeneration": 6, "protection": 5, "increase damage": 5, "dexteri
 RING_STONES = ["瑪瑙", "アレキサンドライト", "紫水晶", "紅玉髄", "ダイヤモンド", "エメラルド", "ゲルマニウム", "花崗岩", "ガーネット", "翡翠",
                "クリプトナイト", "瑠璃", "月長石", "黒曜石", "縞瑪瑙", "オパール", "真珠", "ペリドット", "ルビー", "サファイア", "スチボタンタライト",
                "虎目石", "トパーズ", "トルコ石", "ターフェアイト"]
-ENCHANT_SCROLLS = ("enchant armor", "enchant weapon", "protect armor")   # 読めば必ず得をする巻物 (拾った時点で読む)
+ENCHANT_SCROLLS = ("enchant armor", "enchant weapon", "protect armor")   # 読めば必ず得をする巻物。2026-09-24 までは拾った時点で読んでいたが、
+                                                                            # 判断ボードの回答 (操作の簡略化は全難易度で本家仕様) で Laya が読む行動に
 
 # 杖 (ws_info の出現率)。判断ボードの回答で 3 種にまとめる: 攻撃 = striking 9 + lightning 3 + fire 3 + cold 3 + magic missile 10、
 # 鈍足 = slow monster 11、追放 = teleport away 6。残り (light 12・polymorph 15・haste monster 10・drain life 9・nothing 1・teleport to 6・cancellation 5) は
 # 出さないが、杖そのものの本数は本家どおりにする (薬・巻物と違って「消える」扱いにしない。杖は初見で勝てない敵への数少ない答えなので)
-STICK_PROBS = [("attack", 28), ("slow monster", 11), ("teleport away", 6)]
-STICKS_IN_PLAY = {"attack", "slow monster", "teleport away"}
-STICK_JP = {"attack": "攻撃", "slow monster": "鈍足", "teleport away": "追放"}
-STICK_CHARGES = (5, 3)   # 回数は rnd(5) + 3 (sticks.c の fix_stick)
-STICK_MATERIALS = ["鋼", "黒檀", "樫", "柳", "松", "水晶", "鉄", "銀", "真鍮", "紫檀"]   # 未識別のあいだの見た目 (本家の wood / metal)
+# (2026-09-24 以前は 3 種にまとめていた: 攻撃 28 = 稲妻・炎・冷気・魔法の矢 + 9、鈍足 11、追放 6。9 は striking ではなく drain life の出現率だった。
+#  判断ボードの回答で全難易度 14 種に。NOTES.md 15 章)
+STICK_PROBS = [("light", 12), ("invisibility", 6), ("lightning", 3), ("fire", 3), ("cold", 3), ("polymorph", 15), ("magic missile", 10),
+               ("haste monster", 10), ("slow monster", 11), ("drain life", 9), ("nothing", 1), ("teleport away", 6), ("teleport to", 6),
+               ("cancellation", 5)]
+STICKS_IN_PLAY = {k for k, _ in STICK_PROBS}
+STICK_JP = {"light": "光", "invisibility": "透明化", "lightning": "稲妻", "fire": "炎", "cold": "冷気", "polymorph": "変身", "magic missile": "魔法の矢",
+            "haste monster": "怪物加速", "slow monster": "鈍足", "drain life": "生命吸収", "nothing": "無", "teleport away": "追放",
+            "teleport to": "引き寄せ", "cancellation": "無効化"}
+BAD_STICKS = {"invisibility", "haste monster", "nothing", "teleport to"}   # 振る理由がない (行動には出さない)
+BOLT_STICKS = {"lightning", "fire", "cold"}                                 # 効果は同じ (6d6 の bolt) なので行動は zap_bolt の 1 つ
+STICK_CHARGES = (5, 3)   # 回数は rnd(5) + 3 (sticks.c の fix_stick)。光の杖だけ rnd(10) + 10
+BOLT_LENGTH = 6          # bolt (稲妻・炎・冷気・ドラゴンの炎) の届く長さ。壁に当たると跳ね返る
+DRAGONSHOT = 5           # ドラゴンは勇者が直線上 6 マス以内にいると 1/5 で炎を吐く (chase.c)
+STICK_MATERIALS = ["鋼", "黒檀", "樫", "柳", "松", "水晶", "鉄", "銀", "真鍮", "紫檀", "楓", "桜", "青銅", "錫"]   # 未識別のあいだの見た目 (本家の wood / metal)
 
 # 防具 (arm_info の出現率と a_class の防御。防御は小さいほど硬い)
 ARMORS = [("leather armor", 20, 8), ("ring mail", 15, 7), ("studded leather armor", 15, 7), ("scale mail", 13, 6),

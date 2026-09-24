@@ -45,10 +45,20 @@ ACTION_DESC = {
     "quaff_detect_monsters": "Drink the potion of monster detection: for a while you sense every monster on this level.",
     "quaff_detect_magic": "Drink the potion of magic detection: you learn where the magic items on this level lie.",
     "remove_ring": "Take off a ring you wear (a useless one first, otherwise an unidentified one); fails if it is cursed.",
-    "zap_attack": "Zap the wand of attack at the enemy in line: a bolt that hurts it badly unless it resists.",
+    "read_enchant_armor": "Read the scroll of enchant armor: your armor gets one point better (and any curse on it is lifted).",
+    "read_enchant_weapon": "Read the scroll of enchant weapon: your weapon gets one point better (and any curse on it is lifted).",
+    "read_protect": "Read the scroll of protect armor: your armor can no longer rust.",
+    "zap_bolt": "Zap a wand of lightning, fire or cold at the enemy in line: a bolt that hurts it badly unless it resists; it can bounce back at you.",
+    "zap_missile": "Zap the wand of magic missile at the enemy in line: a small but almost certain hit.",
     "zap_slow": "Zap the wand of slow monster at the enemy in line: it then moves only every other turn.",
     "zap_away": "Zap the wand of teleport away at the enemy in line: it is sent somewhere else on this level.",
+    "zap_polymorph": "Zap the wand of polymorph at the enemy in line: it turns into a random other monster, weaker or stronger.",
+    "zap_drain": "Zap the wand of drain life: you lose half your HP and the monsters in this room share that damage.",
+    "zap_cancel": "Zap the wand of cancellation at the enemy in line: it loses its special power (rust, freeze, poison, drain, flame...).",
+    "zap_light": "Zap the wand of light: this dark room becomes lit.",
     "zap_unknown": "Zap an unidentified wand at the enemy in line; you learn what it was.",
+    "wield_bow": "Put away your weapon and wield the bow: arrows then hit hard, but you are nearly helpless in melee until you wield the weapon again.",
+    "wield_melee": "Put away the bow and wield your melee weapon again.",
     "eat": "Eat food.",
     "pick_up": "Walk to the item (a better weapon or armor first, otherwise the nearest one).",
     "equip": "Put on the better weapon or armor you carry.",
@@ -99,7 +109,8 @@ def monster_name(g, m):
 
 def scroll_words(g):
     kinds = [w for w, name in (("map", "magic mapping"), ("teleport", "teleportation"), ("identify", "identify"), ("remove-curse", "remove curse"),
-                               ("confuse", "monster confusion"), ("hold", "hold monster"), ("scare", "scare monster"), ("food-detection", "food detection"))
+                               ("confuse", "monster confusion"), ("hold", "hold monster"), ("scare", "scare monster"), ("food-detection", "food detection"),
+                               ("enchant-armor", "enchant armor"), ("enchant-weapon", "enchant weapon"), ("protect-armor", "protect armor"))
              if g.scrolls.get(name) and name in g.known]
     return ", ".join(kinds) if kinds else "none"
 
@@ -112,8 +123,16 @@ def ring_words(g):
     return ", ".join(w + (" (cursed)" if g.ring_known_cursed(r) else "") for w, r in zip(names, g.worn))
 
 
+WAND_WORDS = (("bolt", "lightning"), ("bolt", "fire"), ("bolt", "cold"), ("missile", "magic missile"), ("slow", "slow monster"),
+              ("teleport-away", "teleport away"), ("polymorph", "polymorph"), ("drain-life", "drain life"), ("cancellation", "cancellation"), ("light", "light"))
+
+
 def wand_words(g):
-    kinds = [w for w, name in (("attack", "attack"), ("slow", "slow monster"), ("teleport-away", "teleport away")) if g.known_sticks().get(name)]
+    """正体が分かっていて使い道のある杖。"""
+    kinds = []
+    for w, name in WAND_WORDS:
+        if g.known_sticks().get(name) and w not in kinds:
+            kinds.append(w)
     return ", ".join(kinds) if kinds else "none"
 
 
@@ -164,7 +183,7 @@ def describe(g, valid):
              f"Rings worn: {ring_words(g)}.", f"Unidentified rings carried: {count_word(sum(1 for r in g.rings if r['name'] not in g.known))}."]
     status = [w for w, on in (("confused", g.confused), ("held", g.held_by is not None), ("weakened", g.base_str() < g.max_str),
                               ("cursed", g.cursed_worn()), ("hands glowing", g.glowing), ("hasted", g.hasted), ("levitating", g.levitating),
-                              ("blind", g.blind), ("hallucinating", g.hallucinating)) if on]
+                              ("blind", g.blind), ("hallucinating", g.hallucinating), ("wielding the bow", g.wielding_bow())) if on]
     if status:
         parts.append("Status: " + ", ".join(status) + ".")
     if g.on_scare():
@@ -212,7 +231,7 @@ def coarse_key(g, valid):
     hunger = g.hunger_word()
     flags = "".join(c for c, on in (("H", g.held_by is not None), ("C", g.confused), ("G", bool(g.visible_upgrades())),
                                      ("K", bool(g.cursed_worn())), ("S", g.on_scare()), ("B", g.blind), ("X", g.hallucinating),
-                                     ("F", g.hasted), ("L", g.levitating)) if on)  # G: 良い装備が見えている、K: 呪われた物、S: 恐怖の巻物の上、B: 盲目、X: 幻覚、F: 加速、L: 浮遊
+                                     ("F", g.hasted), ("L", g.levitating), ("W", g.wielding_bow())) if on)  # G: 良い装備が見えている、K: 呪われた物、S: 恐怖の巻物の上、B: 盲目、X: 幻覚、F: 加速、L: 浮遊、W: 弓
     return "|".join([hp_word(g), "starving" if hunger in ("weak", "fainting") else hunger, enemy, flags, pace_word(g), ",".join(valid)])
 
 
@@ -331,14 +350,28 @@ class RuleBrain:
             a = "zap_away"
         elif deadly and "zap_slow" in valid:
             a = "zap_slow"
-        elif (deadly or hurt) and "zap_attack" in valid:
-            a = "zap_attack"
+        elif deadly and "zap_cancel" in valid and any(m["ch"] in SPECIAL or m["ch"] == "D" for m in awake):
+            a = "zap_cancel"
+        elif (deadly or hurt) and "zap_bolt" in valid:
+            a = "zap_bolt"
+        elif (deadly or hurt) and "zap_missile" in valid:
+            a = "zap_missile"
+        elif deadly and "zap_polymorph" in valid:
+            a = "zap_polymorph"
         elif deadly and "zap_unknown" in valid:
             a = "zap_unknown"
+        elif awake and "wield_melee" in valid and any(g._adjacent(m) for m in awake):
+            a = "wield_melee"
+        elif "wield_bow" in valid and not any(g._adjacent(m) for m in awake) and g.missiles.get("arrow", 0) >= 3:
+            a = "wield_bow"
+        elif not awake and "wield_melee" in valid:
+            a = "wield_melee"
         elif "quaff_str" in valid and not awake:
             a = "quaff_str"
         elif "equip" in valid and not awake:
             a = "equip"
+        elif not awake and any(x in valid for x in ("read_enchant_armor", "read_enchant_weapon", "read_protect")):
+            a = next(x for x in ("read_enchant_armor", "read_enchant_weapon", "read_protect") if x in valid)
         elif "eat" in valid and g.hunger_word() != "fine":
             a = "eat"
         elif g.hunger_word() != "fine" and not g.food and "read_food" in valid:
@@ -409,10 +442,24 @@ class DiverBrain:
             a = "zap_away"
         elif any(threat_word(g, m) == "deadly" for m in awake) and "zap_slow" in valid:
             a = "zap_slow"
-        elif (hurt or any(threat_word(g, m) == "deadly" for m in awake)) and "zap_attack" in valid:
-            a = "zap_attack"
+        elif any(threat_word(g, m) == "deadly" for m in awake) and "zap_cancel" in valid and any(m["ch"] in SPECIAL or m["ch"] == "D" for m in awake):
+            a = "zap_cancel"
+        elif (hurt or any(threat_word(g, m) == "deadly" for m in awake)) and "zap_bolt" in valid:
+            a = "zap_bolt"
+        elif (hurt or any(threat_word(g, m) == "deadly" for m in awake)) and "zap_missile" in valid:
+            a = "zap_missile"
+        elif any(threat_word(g, m) == "deadly" for m in awake) and "zap_polymorph" in valid:
+            a = "zap_polymorph"
         elif any(threat_word(g, m) == "deadly" for m in awake) and "zap_unknown" in valid:
             a = "zap_unknown"
+        elif awake and "wield_melee" in valid and any(g._adjacent(m) for m in awake):
+            a = "wield_melee"
+        elif "wield_bow" in valid and not any(g._adjacent(m) for m in awake) and g.missiles.get("arrow", 0) >= 3:
+            a = "wield_bow"
+        elif not awake and "wield_melee" in valid:
+            a = "wield_melee"
+        elif not awake and any(x in valid for x in ("read_enchant_armor", "read_enchant_weapon", "read_protect")):
+            a = next(x for x in ("read_enchant_armor", "read_enchant_weapon", "read_protect") if x in valid)
         elif "eat" in valid and g.hunger_word() != "fine":
             a = "eat"
         elif g.hunger_word() != "fine" and not g.food and "read_food" in valid:

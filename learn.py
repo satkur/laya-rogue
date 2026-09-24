@@ -40,7 +40,9 @@ ROLLOUTS = 3        # 1 行動あたりの先読み回数
 P_EVAL = 0.05       # 通過した局面のうち、先読みで調べる割合
 P_EVAL_RARE = 0.5   # 稀な判断 (薬・巻物を使う、危険な場面で未識別を試す) が選べる局面は、この割合で調べる。
                     # 5% のままだと経験表の重みが 4 に届かず、回復薬や転移の使い方を判断ヘッドに教えていなかった (NOTES.md 11 章)
-RARE_ACTIONS = {"quaff_heal", "quaff_str", "read_map", "read_teleport", "read_identify", "zap_attack", "zap_slow", "zap_away", "zap_unknown",
+RARE_ACTIONS = {"quaff_heal", "quaff_str", "read_map", "read_teleport", "read_identify", "zap_bolt", "zap_missile", "zap_slow", "zap_away",
+                "zap_polymorph", "zap_drain", "zap_cancel", "zap_light", "zap_unknown", "wield_bow", "wield_melee",
+                "read_enchant_armor", "read_enchant_weapon", "read_protect",
                 "read_remove_curse", "put_on_ring", "remove_ring", "read_confuse", "read_hold", "drop_scare", "read_food",
                 "quaff_haste", "quaff_raise", "quaff_see_invisible", "quaff_detect_monsters", "quaff_detect_magic"}
 MAX_TURNS = 3000
@@ -61,6 +63,8 @@ WANTS = dict(depth=10, level=5, kills=0.5, gold=0.01, hp=5, heal=2.5, food=3, fe
              missile=0.1, scroll=0.5, unknown=0.5, wand=0.5,   # wand: 正体の分かった杖の残り 1 回ぶん。未識別の杖は 1 本 unknown
              ring=1.0, cursed=1.5)                              # ring: 着けている正体の分かった有益な指輪 1 つ (防御・力は数値に出るので別途)。cursed: 外せない物 1 つの減点
 TACTICAL_SCROLLS = ("teleportation", "remove curse", "monster confusion", "hold monster", "scare monster", "food detection")
+ENCHANT_VALUE = 1.0   # 正体の分かった強化・保護の巻物 1 枚 (読めば装備の点になる。持っているだけより読む方が得になる値)
+USEFUL_STICKS = {"lightning", "fire", "cold", "magic missile", "slow monster", "teleport away", "polymorph", "drain life", "cancellation"}
 TACTICAL_POTIONS = {"haste self": 1.5, "raise level": 2.0, "see invisible": 0.5, "monster detection": 0.5, "magic detection": 0.5}   # 1 本の価値
 
 
@@ -73,8 +77,8 @@ def hp_value(f):
 
 def score(g):
     w = WANTS
-    gear = ((10 - g.ac()) + (1 if g.armor.get("protected") else 0) + avg_dice(g.weapon["dice"])
-            + g.weapon["dplus"] + 0.5 * g.weapon["hplus"])
+    mw = g.melee_weapon()
+    gear = ((10 - g.ac()) + (1 if g.armor.get("protected") else 0) + avg_dice(mw["dice"]) + mw["dplus"] + 0.5 * mw["hplus"])
     rings = sum(1 for r in g.worn if r["name"] in g.known and not g.ring_useless(r) and r["name"] not in ("protection", "add strength"))
     return (w["depth"] * g.depth + w["level"] * g.level + w["kills"] * g.kills + w["gold"] * g.gold
             + w["hp"] * hp_value(g.hp / max(1, g.max_hp)) + w["heal"] * g.has_heal() + w["food"] * min(g.food, 3)
@@ -84,7 +88,8 @@ def score(g):
             + sum(v * g.has_potion(n) for n, v in TACTICAL_POTIONS.items())
             + w["unknown"] * (sum(g.unknown_potions().values()) + sum(g.unknown_scrolls().values()) + len(g.unknown_sticks())
                               + sum(g.unknown_rings().values()))
-            + w["wand"] * sum(g.known_sticks().values()) + w["ring"] * rings - w["cursed"] * len(g.cursed_worn())
+            + w["wand"] * sum(c for k, c in g.known_sticks().items() if k in USEFUL_STICKS) + w["ring"] * rings - w["cursed"] * len(g.cursed_worn())
+            + ENCHANT_VALUE * sum(g.scrolls.get(n, 0) for n in D.ENCHANT_SCROLLS if n in g.known)
             + (100 if g.won else 0) - ((w["death"] + w["death_per_floor"] * max(0, D.GOAL_DEPTH - g.depth)) if g.dead else 0))
 
 

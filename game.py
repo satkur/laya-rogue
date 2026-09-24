@@ -34,8 +34,12 @@ ACTIONS = ["attack", "throw", "approach", "flee", "quaff_heal", "quaff_str", "re
            "quaff_unknown", "read_unknown", "read_identify", "read_remove_curse", "put_on_ring", "remove_ring",
            "read_confuse", "read_hold", "drop_scare", "read_food",
            "quaff_haste", "quaff_raise", "quaff_see_invisible", "quaff_detect_monsters", "quaff_detect_magic",
-           "zap_attack", "zap_slow", "zap_away", "zap_unknown",
+           "read_enchant_armor", "read_enchant_weapon", "read_protect",
+           "zap_bolt", "zap_missile", "zap_slow", "zap_away", "zap_polymorph", "zap_drain", "zap_cancel", "zap_light", "zap_unknown",
+           "wield_bow", "wield_melee",
            "eat", "pick_up", "equip", "explore", "search", "descend", "rest"]
+ZAP_KIND = {"zap_missile": "magic missile", "zap_slow": "slow monster", "zap_away": "teleport away", "zap_polymorph": "polymorph",
+            "zap_drain": "drain life", "zap_cancel": "cancellation", "zap_light": "light"}   # zap_bolt は稲妻・炎・冷気のどれか、zap_unknown は未識別
 
 
 def parse_dice(s):
@@ -57,7 +61,7 @@ FUSES = {"hasted": "動きが元に戻った", "levitating": "床に降りた", 
 
 
 HERO_FIELDS = ("kills", "gold", "level", "exp", "str", "max_str", "hp", "max_hp", "food_left", "food", "potions",
-               "weapon", "armor", "gear", "no_food", "missiles", "scrolls", "bow", "known", "sticks", "rings", "worn", "glowing")
+               "weapon", "armor", "gear", "no_food", "missiles", "scrolls", "bow", "known", "sticks", "rings", "worn", "glowing", "melee")
 
 
 class Game:
@@ -85,7 +89,8 @@ class Game:
         self.armor = dict(name=D.INIT_ARMOR[0], ac=D.INIT_ARMOR[1])
         self.gear = []                          # 拾ったが装備していない武器・防具
         self.pick_kind = None                   # 方針役の fetch: この種類の品を優先して拾いに行く (None なら良い装備 → 最寄りの順)
-        self.bow = True                         # 弓を持っているか (初期装備)。持っていれば矢に弓の威力が乗る
+        self.bow = True                         # 弓を持っているか (初期装備)。構える (wield_bow) と矢に弓の威力が乗り、殴りは 1d1 になる
+        self.melee = None                       # 弓を構えているあいだ、しまってある近接武器
         self.missiles = {"arrow": D.INIT_ARROWS[0] + self.rnd(D.INIT_ARROWS[1])}  # 投げる物: 名前 -> 本数
         self.scrolls = {}                       # 巻物: 名前 -> 枚数
         self.sticks = {}                        # 杖: 種類 -> 残り回数 (同じ種類は合算)
@@ -207,6 +212,7 @@ class Game:
         c.fuses = dict(self.fuses)
         c.missiles, c.scrolls = dict(self.missiles), dict(self.scrolls)
         c.weapon, c.armor = dict(self.weapon), dict(self.armor)
+        c.melee = dict(self.melee) if self.melee else None
         c.gear = [dict(x) for x in self.gear]
         c.visible = set(self.visible)
         c.newly_seen = []
@@ -458,17 +464,18 @@ class Game:
                 return dict(kind="bow", name=name)
             if name in D.MISSILES:
                 return dict(kind="missile", name=name, count=self.rnd(8) + 8 if name in D.STACKED else 1)
-            r = self.rnd(100)
+            r = self.rnd(100)  # 10% は呪い (命中 −1〜−3、装備すると外せない)、5% は +1〜+3 (things.c)
             hplus = -(self.rnd(3) + 1) if r < 10 else self.rnd(3) + 1 if r < 15 else 0
-            return dict(kind="weapon", name=name, dice=parse_dice(dmg), hplus=hplus, dplus=0)
+            return dict(kind="weapon", name=name, dice=parse_dice(dmg), hplus=hplus, dplus=0, cursed=r < 10)
         if kind == "armor":
             name, _, ac = self._pick(D.ARMORS)
-            r = self.rnd(100)
+            r = self.rnd(100)  # 20% は呪い (防御が 1〜3 悪い、着ると脱げない)、8% は 1〜3 良い
             ac += self.rnd(3) + 1 if r < 20 else -(self.rnd(3) + 1) if r < 28 else 0
-            return dict(kind="armor", name=name, ac=ac)
+            return dict(kind="armor", name=name, ac=ac, cursed=r < 20)
         if kind == "stick":
             name = self._pick(D.STICK_PROBS)[0]
-            return dict(kind="stick", name=name, charges=self.rnd(D.STICK_CHARGES[0]) + D.STICK_CHARGES[1]) if name in D.STICKS_IN_PLAY else None
+            charges = self.rnd(10) + 10 if name == "light" else self.rnd(D.STICK_CHARGES[0]) + D.STICK_CHARGES[1]
+            return dict(kind="stick", name=name, charges=charges)
         if kind == "ring":
             name = self._pick(D.RING_PROBS)[0]
             value, cursed = 0, name in D.RING_CURSED
@@ -528,8 +535,8 @@ class Game:
         return sorted((i for i in self.items if (i["x"], i["y"]) in self.visible or i.get("sensed")), key=lambda i: self.dist(i["x"], i["y"]))
 
     def wanted(self, it):
-        """拾いに行く価値のある品か。一度持った恐怖の巻物 (拾うと塵になる) は違う。"""
-        return not (it["kind"] == "scroll" and it["name"] == "scare monster" and it.get("found"))
+        """拾いに行く価値のある品か。一度持った恐怖の巻物 (拾うと塵になる) と、正体の分かった使い道のない物は違う。"""
+        return not (it["kind"] == "scroll" and it["name"] == "scare monster" and it.get("found")) and not self.useless(it)
 
     def visible_loot(self):
         """状況文と回収の標的に使う品物 (足元に置いた恐怖の巻物は除く)。"""
@@ -863,7 +870,7 @@ class Game:
             return
         if before > self.hp:
             self.say(f"{who}の攻撃！ {before - self.hp} ダメージ")
-        ch = m["ch"]
+        ch = m["ch"] if not m.get("cancelled") else ""  # 無効化の杖: 特殊攻撃をしない (fight.c の ISCANC)
         if ch == "A":
             self._rust()
         elif ch == "I":
@@ -915,16 +922,27 @@ class Game:
             self.say(f"勇者は{m['jp']}に倒された…")
 
     # ------------------------------------------------------------------ 行動
+    def melee_weapon(self):
+        """近接武器 (弓を構えているあいだは、しまってある方)。"""
+        return self.melee or self.weapon
+
+    def wielding_bow(self):
+        return self.weapon["name"] == "short bow"
+
     def gear_gain(self, it):
         """武器・防具 it を装備したときの得 (防具は防御の改善、武器は 1 撃の平均ダメージの改善)。それ以外の品は 0。"""
         if it["kind"] == "armor":
             return self.armor["ac"] - it["ac"]
         if it["kind"] == "weapon":
-            return (avg_dice(it["dice"]) + it["dplus"] + it["hplus"] * 0.5) - (avg_dice(self.weapon["dice"]) + self.weapon["dplus"] + self.weapon["hplus"] * 0.5)
+            w = self.melee_weapon()
+            return (avg_dice(it["dice"]) + it["dplus"] + it["hplus"] * 0.5) - (avg_dice(w["dice"]) + w["dplus"] + w["hplus"] * 0.5)
         return 0
 
     def _better_gear(self):
-        best = max(self.gear, key=self.gear_gain, default=None)
+        """装備すれば得をする持ち物。着ている物が呪われていると分かっている枠は候補にしない (外せない)。弓を構えているときは武器も替えない。"""
+        cands = [g for g in self.gear if not (self.armor if g["kind"] == "armor" else self.weapon).get("cursed_known")
+                 and not (g["kind"] == "weapon" and self.wielding_bow())]
+        best = max(cands, key=self.gear_gain, default=None)
         return best if best is not None and self.gear_gain(best) > 0 else None
 
     def visible_upgrades(self):
@@ -1032,8 +1050,8 @@ class Game:
         return max(cands, key=lambda r: D.RING_EAT[r["name"]])
 
     def cursed_worn(self):
-        """外せないと分かっている装備 (解呪の巻物の対象)。"""
-        return [r for r in self.worn if self.ring_known_cursed(r)]
+        """外せないと分かっている装備 (解呪の巻物の対象): 指輪、鎧、武器。"""
+        return [r for r in self.worn if self.ring_known_cursed(r)] + [g for g in (self.armor, self.weapon) if g.get("cursed_known")]
 
     def _put_on(self, r):
         self.rings.remove(r)
@@ -1086,18 +1104,25 @@ class Game:
         return max(sorted(bag, key=lambda k: self.names[k]), key=bag.get)
 
     def _learn(self, kind):
-        """正体が分かった。有害と分かった残りは捨てる (本家でも使い道がない)。"""
+        """正体が分かった。有害と分かった物も捨てない (本家仕様。判断ボードの回答)。使う行動には出ないだけ。"""
         if kind in self.known:
             return
         before = self.label(kind)
         self.known.add(kind)
         self.say(f"{before}は{self.label(kind)}だった")
-        if kind in D.RING_KINDS:
-            return
-        bag = self.potions if kind in D.POTIONS_IN_PLAY else self.sticks if kind in D.STICKS_IN_PLAY else self.scrolls
-        if kind in (D.BAD_POTIONS | D.BAD_SCROLLS) and bag.get(kind, 0) > 0:
-            self.say(f"残りの{self.label(kind)}を捨てた")
-            del bag[kind]
+
+    def useless(self, it):
+        """正体が分かっていて使い道のない品 (拾いに行く標的にしない。踏めば拾う)。"""
+        k, name = it["kind"], it.get("name")
+        if k == "potion":
+            return name in self.known and name in D.BAD_POTIONS
+        if k == "scroll":
+            return name in self.known and name in D.BAD_SCROLLS
+        if k == "stick":
+            return name in self.known and name in D.BAD_STICKS
+        if k == "ring":
+            return self.ring_useless(it)
+        return False
 
     def _quaff(self, kind):
         """薬を 1 つ飲む (potions.c)。正体が分かっていてもいなくても効果は同じで、飲めば分かる。"""
@@ -1257,12 +1282,26 @@ class Game:
             v.append("put_on_ring")
         if self._ring_to_remove():
             v.append("remove_ring")
+        for name, act in (("enchant armor", "read_enchant_armor"), ("enchant weapon", "read_enchant_weapon"), ("protect armor", "read_protect")):
+            if self.scrolls.get(name) and name in self.known and not (name == "protect armor" and self.armor.get("protected")):
+                v.append(act)
         if self.sticks and self._zap_target():
-            for kind, act in (("attack", "zap_attack"), ("slow monster", "zap_slow"), ("teleport away", "zap_away")):
+            if any(self.sticks.get(k) and k in self.known for k in D.BOLT_STICKS):
+                v.append("zap_bolt")
+            for act in ("zap_missile", "zap_slow", "zap_away", "zap_polymorph", "zap_cancel"):
+                kind = ZAP_KIND[act]
                 if self.sticks.get(kind) and kind in self.known:
                     v.append(act)
             if self.unknown_sticks():
                 v.append("zap_unknown")
+        if self.sticks.get("drain life") and "drain life" in self.known and self.hp >= 2 and self._drain_targets():
+            v.append("zap_drain")
+        if self.sticks.get("light") and "light" in self.known and (r := self.room_at(self.hx, self.hy)) and r["dark"]:
+            v.append("zap_light")
+        if self.bow and not self.wielding_bow() and self.missiles.get("arrow") and self._throw_target():
+            v.append("wield_bow")
+        if self.wielding_bow() and self.melee:
+            v.append("wield_melee")
         if self.food and self.food_left < 1000:
             v.append("eat")
         if free and not self.levitating and (target := self.pick_target()) and ((target["x"], target["y"]) in self.visible
@@ -1325,29 +1364,148 @@ class Game:
         """モンスターの魔法への抵抗 (save_throw: 14 + VS_MAGIC − レベル / 2 以上を d20 で出す)。"""
         return self.roll(1, 20) >= 14 + VS_MAGIC - m["lvl"] // 2
 
+    def _drain_targets(self):
+        """生命吸収の杖が効く相手: 同じ部屋のモンスター (通路にいれば隣のマスの敵)。"""
+        r = self.room_at(self.hx, self.hy)
+        if r:
+            return [m for m in self.monsters if self.room_at(m["x"], m["y"]) is r]
+        return [m for m in self.monsters if self._adjacent(m)]
+
     def _zap(self, kind, m):
-        """杖を 1 回振る。攻撃 = 炎・冷気・稲妻の bolt (抵抗に失敗すると 6d6)、鈍足 = 1 ターンおきにしか動けない、追放 = 階のどこかへ飛ばす。"""
+        """杖を 1 回振る (sticks.c の do_zap)。m は直線上の標的 (方向のいらない杖は None)。"""
+        if kind == "drain life" and self.hp < 2:
+            self.say("弱りすぎていて使えない")
+            return
         self.sticks[kind] -= 1
         if self.sticks[kind] <= 0:
             del self.sticks[kind]
-        m["awake"] = True
-        if kind == "attack":
+        if m is not None:
+            m["awake"] = True
+            m.pop("held", None)
+        name = m["jp"] if m is not None and self.can_see(m) else "何か"
+        if kind in D.BOLT_STICKS:
+            dx, dy = (m["x"] > self.hx) - (m["x"] < self.hx), (m["y"] > self.hy) - (m["y"] < self.hy)
+            self._fire_bolt(self.hx, self.hy, dx, dy, D.STICK_JP[kind], None)
+        elif kind == "magic missile":  # 1d4 + 1、ほぼ必中。抵抗されると消える
             if self._monster_save(m):
-                self.say(f"杖の光は{m['jp']}をかすめた")
+                self.say("魔法の矢は煙になって消えた")
             else:
-                m["hp"] -= self.roll(6, 6)
-                self.say(f"杖の光が{m['jp']}を打った")
+                m["hp"] -= self.roll(1, 4) + 1
+                self.say(f"魔法の矢が{name}に当たった")
                 if m["hp"] <= 0:
                     self._kill(m)
         elif kind == "slow monster":
-            m["slow"] = True
-            self.say(f"{m['jp']}の動きが鈍くなった")
+            if m.get("haste"):
+                del m["haste"]
+            else:
+                m["slow"] = True
+            self.say(f"{name}の動きが鈍くなった")
+        elif kind == "haste monster":
+            if m.get("slow"):
+                del m["slow"]
+            else:
+                m["haste"] = True
+            self.say(f"{name}の動きが速くなった")
         elif kind == "teleport away":
             real = [r for r in self.rooms if not r["gone"]]
             taken = {(o["x"], o["y"]) for o in self.monsters} | {(self.hx, self.hy)}
             m["x"], m["y"] = self._floor_spot(self.rng.choice(real), taken)
-            self.say(f"{m['jp']}はどこかへ消えた")
+            self.say(f"{name}はどこかへ消えた")
+        elif kind == "teleport to":
+            free = [c for c in self._nbr[(self.hx, self.hy)] if self._monster_at(*c) is None]
+            if free:
+                m["x"], m["y"] = min(free, key=lambda c: max(abs(c[0] - m["x"]), abs(c[1] - m["y"])))
+            self.say(f"{name}が目の前に引き寄せられた")
+        elif kind == "polymorph":
+            self._polymorph(m)
+        elif kind == "cancellation":
+            m["cancelled"] = True
+            m["gazed"] = True
+            m["flags"] = m["flags"].replace("I", "")
+            if m["ch"] == "X":
+                m.pop("disguise", None)
+            self.say(f"{name}の特殊な力が消えた")
+        elif kind == "invisibility":
+            if "I" not in m["flags"]:
+                m["flags"] += "I"
+            self.say(f"{name}の姿が消えた")
+        elif kind == "light":
+            r = self.room_at(self.hx, self.hy)
+            if r and r["dark"]:
+                r["dark"] = False
+                self._look()
+                self.say("部屋が明るくなった")
+            else:
+                self.say("何も起きなかった")
+        elif kind == "drain life":
+            targets = self._drain_targets()
+            if not targets:
+                self.say("体がちくちくした")
+            else:
+                self.hp //= 2
+                each = self.hp // len(targets)
+                for t in targets:
+                    t["hp"] -= each
+                    t["awake"] = True
+                    if t["hp"] <= 0:
+                        self._kill(t)
+                self.say(f"自分の生命を絞って周りの怪物 {len(targets)} 体を打った")
+        elif kind == "nothing":
+            self.say("何も起きなかった")
         self._learn(kind)
+
+    def _polymorph(self, m):
+        """変身の杖: ランダムな別の種類になる (位置と起きているかは保つ。sticks.c の WS_POLYMORPH)。"""
+        ch = chr(self.rnd(26) + 65)
+        was = m["jp"]
+        self._spawn(ch, m["x"], m["y"], awake=True)
+        new = self.monsters.pop()
+        for k in ("kind", "jp", "ch", "hp", "max_hp", "lvl", "arm", "dice", "exp", "flags", "carry"):
+            m[k] = new[k]
+        for k in ("slow", "haste", "confused", "cancelled", "disguise"):
+            m.pop(k, None)
+        self.say(f"{was}は{m['jp']}に変身した")
+
+    def _bolt_path(self, x, y, dx, dy):
+        """bolt の通り道 (sticks.c の fire_bolt): BOLT_LENGTH マス進み、壁に当たると跳ね返る (跳ね返りも 1 歩ぶん使う)。"""
+        path = []
+        for _ in range(D.BOLT_LENGTH):
+            nx, ny = x + dx, y + dy
+            if not (0 <= nx < W and 0 <= ny < H) or self.tiles[ny][nx] not in PASSABLE:
+                dx, dy = -dx, -dy
+                continue
+            x, y = nx, ny
+            path.append((x, y))
+        return path
+
+    def _fire_bolt(self, x, y, dx, dy, name, shooter):
+        """稲妻・炎・冷気の bolt。shooter が None なら勇者が振った杖、そうでなければそのモンスター (ドラゴンの炎)。
+        最初に当たった相手で止まる。モンスターは魔法の抵抗に成功すると外れ、ドラゴンは炎が効かない。跳ね返って勇者に当たることもある。"""
+        for px, py in self._bolt_path(x, y, dx, dy):
+            if (px, py) == (self.hx, self.hy):
+                if self.save(VS_MAGIC):
+                    self.say(f"{name}は体をかすめて飛んでいった")
+                else:
+                    self.hp -= self.roll(6, 6)
+                    self.say(f"{name}に打たれた！")
+                    if self.hp <= 0:
+                        self.hp, self.dead, self.cause = 0, True, f"{shooter['jp']}の炎" if shooter else f"跳ね返った{name}"
+                        self.say(f"勇者は{self.cause}で倒れた…")
+                return
+            m = self._monster_at(px, py)
+            if m is not None and m is not shooter:
+                m["awake"] = True
+                who = m["jp"] if self.can_see(m) else "何か"
+                if m["ch"] == "D" and name == "炎":
+                    self.say(f"{name}は{who}に跳ね返された")
+                elif self._monster_save(m):
+                    self.say(f"{name}は{who}をかすめた")
+                else:
+                    m["hp"] -= self.roll(6, 6)
+                    self.say(f"{name}が{who}を打った")
+                    if m["hp"] <= 0:
+                        self._kill(m)
+                return
 
     def _throw(self):
         target = self._throw_target()
@@ -1377,10 +1535,10 @@ class Game:
             self.items.append(dict(kind="missile", name=name, count=1, x=landing[0], y=landing[1]))
 
     def _hurl_dice(self, name):
-        """投げたときのダメージダイス。矢は弓を持っていてこそ (持っていなければ振り回しの 1x1)。"""
+        """投げたときのダメージダイス。矢は弓を構えていてこそ (構えていなければ振り回しの 1x1。weapons.c の missile)。"""
         for n, _, dmg, hurl, launcher in D.WEAPONS:
             if n == name:
-                return hurl if launcher is None or self.bow else dmg
+                return hurl if launcher is None or self.weapon["name"] == launcher else dmg
         return "1x1"
 
     def missile_damage_per_turn(self, m):
@@ -1396,13 +1554,18 @@ class Game:
             del self.scrolls[name]
         if name == "enchant armor":
             self.armor["ac"] -= 1
+            self.armor.pop("cursed", None)  # 強化は呪いも解く (scrolls.c)
+            self.armor.pop("cursed_known", None)
             self.say("鎧が輝いた (強化)")
         elif name == "enchant weapon":
+            w = self.melee_weapon()  # 弓を構えていても本家は「構えている物」だが、弓に乗せても意味が薄いので近接武器に
             if self.rnd(2) == 0:
-                self.weapon["hplus"] += 1
+                w["hplus"] += 1
             else:
-                self.weapon["dplus"] += 1
-            self.say(f"{self.weapon['name']} が輝いた (強化)")
+                w["dplus"] += 1
+            w.pop("cursed", None)
+            w.pop("cursed_known", None)
+            self.say(f"{w['name']} が輝いた (強化)")
         elif name == "protect armor":
             self.armor["protected"] = True
             self.say("鎧が錆びなくなった")
@@ -1451,8 +1614,9 @@ class Game:
         elif name == "remove curse":
             for r in self.worn:
                 r["cursed"], r["cursed_known"] = False, False
-            self.armor.pop("cursed", None)
-            self.weapon.pop("cursed", None)
+            for g in (self.armor, self.weapon):
+                g.pop("cursed", None)
+                g.pop("cursed_known", None)
             self.say("誰かに見守られている気がした (解呪)")
         elif name == "sleep":
             self.no_command += self.rnd(self.spread(D.SLEEPTIME)) + 4  # rnd(SLEEPTIME) + 4
@@ -1597,15 +1761,28 @@ class Game:
             r = self._ring_to_remove()
             if r:
                 self._remove(r)
-        elif action in ("zap_attack", "zap_slow", "zap_away", "zap_unknown"):
+        elif action in ("read_enchant_armor", "read_enchant_weapon", "read_protect"):
+            name = {"read_enchant_armor": "enchant armor", "read_enchant_weapon": "enchant weapon", "read_protect": "protect armor"}[action]
+            if self.scrolls.get(name) and name in self.known:
+                self._read(name)
+        elif action == "zap_drain" and self.sticks.get("drain life") and "drain life" in self.known:
+            self.say("生命吸収の杖を振った")
+            self._zap("drain life", None)
+        elif action == "zap_light" and self.sticks.get("light") and "light" in self.known:
+            self.say("光の杖を振った")
+            self._zap("light", None)
+        elif action in ("zap_bolt", "zap_missile", "zap_slow", "zap_away", "zap_polymorph", "zap_cancel", "zap_unknown"):
             target = self._zap_target()
             if target:
                 m = target[0]
-                kind = {"zap_attack": "attack", "zap_slow": "slow monster", "zap_away": "teleport away"}.get(action)
-                if kind is None:
+                if action == "zap_bolt":
+                    kind = next(k for k in ("lightning", "fire", "cold") if self.sticks.get(k) and k in self.known)
+                elif action == "zap_unknown":
                     kind = self._unknown_pick(self.unknown_sticks())
+                else:
+                    kind = ZAP_KIND[action]
                 if self.sticks.get(kind):
-                    self.say(f"{self.label(kind)}を{m['jp']}に向けて振った")
+                    self.say(f"{self.label(kind)}を{m['jp'] if self.can_see(m) else '何か'}に向けて振った")
                     self._zap(kind, m)
         elif action == "eat" and self.food:
             self.food -= 1
@@ -1618,12 +1795,24 @@ class Game:
         elif action == "equip":
             g = self._better_gear()
             if g:
-                self.gear.remove(g)
-                if g["kind"] == "armor":
-                    self.armor = dict(name=g["name"], ac=g["ac"])
+                cur = self.armor if g["kind"] == "armor" else self.weapon
+                if cur.get("cursed"):  # 呪われた物は外せない (pack.c の dropcheck)。試して初めて分かる
+                    cur["cursed_known"] = True
+                    self.say(f"{cur['name']} は外せない (呪われている)")
                 else:
-                    self.weapon = dict(name=g["name"], dice=g["dice"], hplus=g["hplus"], dplus=g["dplus"])
-                self.say(f"{g['name']} を装備した")
+                    self.gear.remove(g)
+                    if g["kind"] == "armor":
+                        self.armor = dict(name=g["name"], ac=g["ac"], cursed=g.get("cursed", False))
+                    else:
+                        self.weapon = dict(name=g["name"], dice=g["dice"], hplus=g["hplus"], dplus=g["dplus"], cursed=g.get("cursed", False))
+                    self.say(f"{g['name']} を装備した")
+        elif action == "wield_bow" and self.bow and not self.wielding_bow():
+            self.melee = self.weapon
+            self.weapon = dict(name="short bow", dice=parse_dice("1x1"), hplus=1, dplus=0)  # 初期装備の弓は +1 (init.c)
+            self.say("弓を構えた")
+        elif action == "wield_melee" and self.wielding_bow() and self.melee:
+            self.weapon, self.melee = self.melee, None
+            self.say(f"{self.weapon['name']} を構え直した")
         elif action == "explore":
             self._move_to(self._explore_step())
             if self._explore and (self.hx, self.hy) == self._explore[0]:
@@ -1655,20 +1844,12 @@ class Game:
                 self.say("食料を拾った")
             elif it["kind"] == "potion":
                 k = it["name"]
-                if k in self.known and k in D.BAD_POTIONS:
-                    self.say(f"{self.label(k)}は使い道がないので捨てた")
-                else:
-                    self.potions[k] = self.potions.get(k, 0) + 1
-                    self.say(f"{self.label(k)}を拾った")
+                self.potions[k] = self.potions.get(k, 0) + 1
+                self.say(f"{self.label(k)}を拾った")
             elif it["kind"] == "scroll":
                 k = it["name"]
-                if k in self.known and k in D.BAD_SCROLLS:
-                    self.say(f"{self.label(k)}は使い道がないので捨てた")
-                else:
-                    self.scrolls[k] = self.scrolls.get(k, 0) + 1
-                    self.say(f"{self.label(k)}を拾った")
-                    if k in self.known and k in D.ENCHANT_SCROLLS:  # 正体が分かっていて読めば必ず得なので、拾った時点で読む
-                        self._read(k)
+                self.scrolls[k] = self.scrolls.get(k, 0) + 1
+                self.say(f"{self.label(k)}を拾った")
             elif it["kind"] == "stick":
                 self.sticks[it["name"]] = self.sticks.get(it["name"], 0) + it["charges"]
                 self.say(f"{self.label(it['name'])}を拾った")
@@ -1739,6 +1920,12 @@ class Game:
 
     def _monster_turn(self, m):
         """起きているモンスター 1 体の 1 手: 隣なら攻撃、そうでなければ勇者へ 1 歩 (do_chase)。"""
+        if m["ch"] == "D" and not m.get("cancelled") and self.rules.dragon_flame:
+            dx, dy = self.hx - m["x"], self.hy - m["y"]
+            if (dx == 0 or dy == 0 or abs(dx) == abs(dy)) and dx * dx + dy * dy <= D.BOLT_LENGTH ** 2 and self.rnd(D.DRAGONSHOT) == 0:
+                self.say("ドラゴンが炎を吐いた！")
+                self._fire_bolt(m["x"], m["y"], (dx > 0) - (dx < 0), (dy > 0) - (dy < 0), "炎", m)
+                return
         scared = self.on_scare()
         if self._adjacent(m) and not scared and not m.get("confused"):
             self._monster_attacks(m)
