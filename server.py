@@ -1,10 +1,11 @@
-"""Laya Rogue: Laya が勇者を操作してダンジョンに潜る。目標は地下 20 階。
+"""Laya Rogue: Laya が勇者を操作してダンジョンに潜る。目標は地下 26 階。
 
     uv run server.py            # モデルを読み込み、ブラウザを開く
     uv run server.py --no-open
     uv run server.py --llm      # 方針役の LLM (strategist.py、claude -p を呼ぶ) を入れた状態で始める。画面の L キーでも切り替えられる
     uv run server.py --llm-model sonnet
-    uv run server.py --gen gen22    # 世代を指定 (既定は DEFAULT_GENERATION = 測定済みの最良)
+    uv run server.py --gen gen22    # 世代を指定 (既定は DEFAULT_GENERATION = 測定済みの最良)。画面からは替えない
+    uv run server.py --difficulty original   # 難易度 (既定 normal)。画面からも切り替えられる (NOTES.md 15 章)
 """
 import asyncio
 import sys
@@ -16,6 +17,7 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
+import rogue_data as D
 from brain import WEIGHTS, LayaBrain
 from game import H, W, Game
 import strategist as strategist_mod
@@ -27,6 +29,8 @@ brain = None
 LLM_MODEL = sys.argv[sys.argv.index("--llm-model") + 1] if "--llm-model" in sys.argv else DEFAULT_MODEL
 DEFAULT_GENERATION = "gen24"  # 既定は「測定済みの最良」を固定 (weights/ の最新番号は未測定のことがある。gen24 8.88 / gen21 8.33、NOTES 13 章)
 GENERATION = sys.argv[sys.argv.index("--gen") + 1] if "--gen" in sys.argv else DEFAULT_GENERATION
+DIFFICULTY = sys.argv[sys.argv.index("--difficulty") + 1] if "--difficulty" in sys.argv else "normal"
+D.rules(DIFFICULTY)  # 名前の検査
 adviser = Strategist(model=LLM_MODEL, enabled="--llm" in sys.argv)  # いまは付けると成績が下がるので既定は切 (NOTES.md 6 章)
 strategist_mod.MAX_CALLS_TOTAL = 300  # 画面を開きっぱなしにしても、ここで方針役は自動で止まる (画面で入れ直すと再開)
 
@@ -40,7 +44,7 @@ def generations():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global brain
-    print("Laya を読み込み中...", flush=True)
+    print(f"Laya を読み込み中... (難易度 {DIFFICULTY.upper()})", flush=True)
     gens = generations()
     brain = LayaBrain(GENERATION if GENERATION in gens else (gens[-1] if gens else None))
     g = Game(0)
@@ -93,15 +97,17 @@ def frame(g, d, log_from):
 async def ws(sock: WebSocket):
     await sock.accept()
     cfg = {"delay": 0.119, "paused": False, "step": False, "restart": False}
-    await sock.send_json({"type": "hello", "w": W, "h": H, "generations": generations(), "generation": brain.generation,
+    await sock.send_json({"type": "hello", "w": W, "h": H, "generation": brain.generation,
+                          "difficulties": list(D.DIFFICULTIES), "difficulty": DIFFICULTY,
                           "orders": [], "order": None,  # 命令はいったん外してある
                           "adviser": adviser_state()})
 
     async def play():
+        global DIFFICULTY
         while True:
-            g = Game()
-            g.say(f"地図の種 {g.seed}")  # sim.py --seeds {種} で同じ地図を再現できる
-            print(f"ゲーム開始: 種 {g.seed} / 世代 {brain.generation}", flush=True)
+            g = Game(difficulty=DIFFICULTY)
+            g.say(f"地図の種 {g.seed} ({DIFFICULTY.upper()})")  # sim.py --seeds {種} --difficulty {難易度} で同じ地図を再現できる
+            print(f"ゲーム開始: 種 {g.seed} / 世代 {brain.generation} / 難易度 {DIFFICULTY}", flush=True)
             adviser.reset()
             gen = brain.generation
             depth, log_from = g.depth, 0
@@ -130,7 +136,7 @@ async def ws(sock: WebSocket):
                 log_from = len(g.log)
                 await asyncio.sleep(cfg["delay"])
             if not cfg["restart"]:
-                await sock.send_json({"type": "end", "won": g.won, "cause": g.cause, "generation": gen, "depth": g.depth,
+                await sock.send_json({"type": "end", "won": g.won, "cause": g.cause, "generation": gen, "difficulty": g.rules.name, "depth": g.depth,
                                       "kills": g.kills, "gold": g.gold, "turn": g.turn, "level": g.level})
                 await asyncio.sleep(3.0)
             cfg["restart"] = False
@@ -151,12 +157,12 @@ async def ws(sock: WebSocket):
                 if adviser.enabled:
                     adviser.stopped, adviser.errors, strategist_mod.total_calls = None, 0, 0
                 await sock.send_json({"type": "adviser", "adviser": adviser_state()})
-            elif m["type"] == "generation":  # 世代を替えたら、その頭脳で最初から潜り直す
-                gen = m.get("name")
-                if gen is None or gen in generations():
-                    brain.load_generation(gen)
+            elif m["type"] == "difficulty":  # 難易度を替えたら、最初から潜り直す
+                name = m.get("name")
+                if name in D.DIFFICULTIES:
+                    globals()["DIFFICULTY"] = name
                     cfg["restart"] = True
-                    await sock.send_json({"type": "generation", "generation": brain.generation})
+                    await sock.send_json({"type": "difficulty", "difficulty": name})
     except WebSocketDisconnect:
         pass
     finally:

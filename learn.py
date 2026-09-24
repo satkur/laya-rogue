@@ -1,6 +1,8 @@
 """自己対戦で「この状況でこの行動を取ると、その先どうなったか」の経験表を作る。GPU 不要。
 
-    uv run learn.py [ラウンド数] [1 ラウンドのエピソード数]
+    uv run learn.py [ラウンド数] [1 ラウンドのエピソード数] [--difficulty normal]
+
+学習は NORMAL で行う (NOTES.md 15 章)。--difficulty は物差し用に他の難易度でも回せるようにしてあるだけ。
 
 1 ラウンドの流れ:
   1. いまの経験表に従って (ときどき気まぐれに) ダンジョンを潜る
@@ -139,9 +141,9 @@ def _init(table, v_default):
 
 def episode(args):
     """1 回潜り、調べた局面ごとの (粗いキー, 状況文, {行動: 平均リターン}) と、階に着いた時点の勇者の状態を返す。"""
-    seed, start = args
+    seed, start, difficulty = args
     rng = random.Random(seed)
-    g = Game(rng.randrange(1 << 30), start)
+    g = Game(rng.randrange(1 << 30), start, difficulty)
     out, arrivals, depth = [], [], g.depth
     turns = 0
     while not g.over and turns < MAX_TURNS:
@@ -174,8 +176,16 @@ def be_nice():
 
 
 def main():
-    rounds = int(sys.argv[1]) if len(sys.argv) > 1 else 12
-    episodes = int(sys.argv[2]) if len(sys.argv) > 2 else 640
+    argv = list(sys.argv[1:])
+    difficulty = "normal"
+    if "--difficulty" in argv:
+        i = argv.index("--difficulty")
+        difficulty = argv[i + 1]
+        del argv[i:i + 2]
+    D.rules(difficulty)  # 名前の検査
+    rounds = int(argv[0]) if argv else 12
+    episodes = int(argv[1]) if len(argv) > 1 else 640
+    print(f"難易度 {difficulty.upper()}", flush=True)
     be_nice()
     DATA.mkdir(exist_ok=True)
     table = {}   # 粗いキー -> {"q": {行動: [平均リターン, 重み]}, "texts": [そのキーで実際に出会った状況文]}
@@ -193,7 +203,7 @@ def main():
         jobs = []
         for i in range(episodes):
             start = rng.choice(pool[rng.choice(list(pool))]) if pool and rng.random() < P_CONTINUE else None
-            jobs.append((r * 1_000_003 + i, start))
+            jobs.append((r * 1_000_003 + i, start, difficulty))
         with ProcessPoolExecutor(max_workers=max(1, (os.cpu_count() or 4) - 2), initializer=_init, initargs=(table, v_default)) as pool_exec:
             results = list(pool_exec.map(episode, jobs, chunksize=2))
         n_eval, fresh_depths, deepest = 0, [], 0
