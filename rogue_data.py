@@ -26,14 +26,17 @@ DIFFICULTIES = {
     "normal": dict(
         hidden_doors=False,      # 隠し扉と「捜索」(NOTES.md 9〜10 章: 判断が生まれず成績と見た目を損ねるだけだった)
         potions_out={"blindness", "hallucination"},   # 850 ターンは長すぎる (判断ボードの回答)。引いたときは何も出ない
+        treasure_rooms=True,
     ),
     "hard": dict(
         hidden_doors=True,
         potions_out=set(),
+        treasure_rooms=True,
     ),
     "original": dict(
         hidden_doors=True,
         potions_out=set(),
+        treasure_rooms=True,
     ),
 }
 
@@ -58,6 +61,8 @@ SEARCH_CAPS = (20, 6)    # 同じマスで捜索する回数の上限 (本家に
 BEARTIME = 3             # 熊の罠で動けないターン数 (rogue.h: spread(3))
 SLEEPTIME = 5            # 眠りガスで何もできないターン数 (rogue.h: spread(5))。眠りの巻物は rnd(SLEEPTIME) + 4
 MAX_OBJ = 9              # 1 階あたりのアイテム出現試行回数 (各 36%)
+TREAS_ROOM = 20          # 宝物部屋: 1/20 の階 (new_level.c の treas_room)。品物 MINTREAS〜MAXTREAS 個、モンスターはそれより 2 体以上多く 1 階深い表から、全員 mean
+MAXTREAS, MINTREAS = 10, 2
 
 # (名前, 日本語名, 持ち物確率, フラグ, 経験値, レベル, 防御, ダメージダイス)
 # フラグ: M=mean (見かけると 2/3 で襲ってくる) F=fly G=greedy I=invisible

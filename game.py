@@ -291,6 +291,8 @@ class Game:
             if self.rnd(100) < (80 if r["gold"] else 25):
                 x, y = self._floor_spot(r, taken)
                 self._spawn(self._rand_monster(False), x, y)
+        if self.rules.treasure_rooms and self.rnd(D.TREAS_ROOM) == 0:
+            self._treasure_room(real, taken)
         for _ in range(D.MAX_OBJ):
             if self.rnd(100) < 36:
                 thing = self._new_thing()
@@ -321,6 +323,29 @@ class Game:
         self._look()
         if not self.won:
             self.say(f"地下 {self.depth} 階")
+
+    def _treasure_room(self, real, taken):
+        """宝物部屋 (new_level.c の treas_room): 部屋を 1 つ選び、品物を rnd(spots) + 2 個 (最大 10)、モンスターをそれより 2 体以上多く
+        1 階深い出現表から置く。全員 mean (見かけると襲ってくる) で持ち物つき。扉は普通 (本家も特別な扉はない)。"""
+        r = self.rng.choice(real)
+        floor = (r["w"] - 2) * (r["h"] - 2)
+        spots = min(floor - D.MINTREAS, D.MAXTREAS - D.MINTREAS)
+        n_items = self.rnd(spots) + D.MINTREAS
+        for _ in range(n_items):
+            thing = self._new_thing()
+            if thing:
+                thing["x"], thing["y"] = self._floor_spot(r, taken)
+                self.items.append(thing)
+        nm = min(max(self.rnd(spots) + D.MINTREAS, n_items + 2), floor)
+        self.depth += 1
+        for _ in range(nm):
+            x, y = self._floor_spot(r, taken)
+            self._spawn(self._rand_monster(False), x, y)
+            m = self.monsters[-1]
+            if "M" not in m["flags"]:
+                m["flags"] += "M"
+        self.depth -= 1
+        r["treasure"] = True
 
     def _floor_spot(self, room, taken):
         for _ in range(60):
@@ -1389,6 +1414,8 @@ class Game:
                     if self.tiles[y][x] != ROCK and not self.seen[y][x] and (x, y) not in self.mapped:
                         self.mapped.add((x, y))
                         self.newly_seen.append((x, y, self.tiles[y][x]))
+            for t in self.traps:  # 本家の地図は罠のマスも映す
+                t["found"] = True
             self._explore, self._goal = [], ([], None)
             self.say("この階の地図が頭に浮かんだ")
         elif name == "teleportation":
@@ -1694,37 +1721,63 @@ class Game:
                     if not self.save(VS_MAGIC):
                         self.confused += self.spread(20)
                         self.say("メデューサの視線で混乱した")
-            scared = self.on_scare()
-            if self._adjacent(m) and not scared and not m.get("confused"):
+            self._monster_turn(m)
+            if m in self.monsters and not self.dead and m.get("haste"):  # 怪物加速の杖: 2 回動く (chase.c の move_monst)
+                self._monster_turn(m)
+            if m in self.monsters and not self.dead and "F" in m["flags"] and self.dist(m["x"], m["y"]) >= 3:  # 飛行: 離れていれば 2 歩 (chase.c の runners)
+                self._monster_turn(m)
+
+    def _room_gold(self, m):
+        """強欲 (オーク) が守る金貨: 自分のいる部屋に落ちている金貨の位置 (monsters.c、chase.c の do_chase)。"""
+        r = self.room_at(m["x"], m["y"])
+        if not r or not r["gold"]:
+            return None
+        for it in self.items:
+            if it["kind"] == "gold" and r["x"] <= it["x"] < r["x"] + r["w"] and r["y"] <= it["y"] < r["y"] + r["h"]:
+                return (it["x"], it["y"])
+        return None
+
+    def _monster_turn(self, m):
+        """起きているモンスター 1 体の 1 手: 隣なら攻撃、そうでなければ勇者へ 1 歩 (do_chase)。"""
+        scared = self.on_scare()
+        if self._adjacent(m) and not scared and not m.get("confused"):
+            self._monster_attacks(m)
+            return
+        if m["ch"] == "F":
+            return
+        occupied = {(o["x"], o["y"]) for o in self.monsters if o is not m} | ({(self.hx, self.hy)} if scared else set())
+        steps = [p for p in self._nbr[(m["x"], m["y"])] if p not in occupied and not self.scare_at(*p)]
+        if not steps:
+            return
+        if (m.get("confused") and self.rnd(5) != 0) or (m["ch"] == "B" and self.rnd(2) == 0) or (m["ch"] == "P" and self.rnd(5) == 0):
+            # 混乱した相手 (4/5) とコウモリ・ファントムはふらふら動く。勇者のマスに踏み込めばそれが攻撃になる (chase.c)
+            if m.get("confused") and self.rnd(20) == 0:
+                del m["confused"]
+            p = self.rng.choice(steps)
+            if p == (self.hx, self.hy):
                 self._monster_attacks(m)
-                continue
-            if m["ch"] == "F":
-                continue
-            occupied = {(o["x"], o["y"]) for o in self.monsters if o is not m} | ({(self.hx, self.hy)} if scared else set())
-            steps = [p for p in self._nbr[(m["x"], m["y"])] if p not in occupied and not self.scare_at(*p)]
-            if not steps:
-                continue
-            if (m.get("confused") and self.rnd(5) != 0) or (m["ch"] == "B" and self.rnd(2) == 0) or (m["ch"] == "P" and self.rnd(5) == 0):
-                # 混乱した相手 (4/5) とコウモリ・ファントムはふらふら動く。勇者のマスに踏み込めばそれが攻撃になる (chase.c)
-                if m.get("confused") and self.rnd(20) == 0:
-                    del m["confused"]
-                p = self.rng.choice(steps)
-                if p == (self.hx, self.hy):
-                    self._monster_attacks(m)
-                else:
-                    m["x"], m["y"] = p
-                continue
-            if self._adjacent(m):  # 混乱していて 1/5 で正気に動いたぶん
-                self._monster_attacks(m)
-                continue
-            steps = [p for p in steps if p != (self.hx, self.hy)]
-            if not steps:
-                continue
-            dist = self._hero_dist_map()
-            here = dist.get((m["x"], m["y"]), 99)
-            best = min(steps, key=lambda p: dist.get(p, 99))
-            if dist.get(best, 99) < here:
-                m["x"], m["y"] = best
+            else:
+                m["x"], m["y"] = p
+            return
+        if self._adjacent(m):  # 混乱していて 1/5 で正気に動いたぶん
+            self._monster_attacks(m)
+            return
+        steps = [p for p in steps if p != (self.hx, self.hy)]
+        if not steps:
+            return
+        if "G" in m["flags"]:  # 強欲: 部屋の金貨を守りに行き、そこに立つ。金貨が拾われたら勇者を追う
+            gold = self._room_gold(m)
+            if gold:
+                if (m["x"], m["y"]) != gold:
+                    best = min(steps, key=lambda p: max(abs(p[0] - gold[0]), abs(p[1] - gold[1])))
+                    if max(abs(best[0] - gold[0]), abs(best[1] - gold[1])) < max(abs(m["x"] - gold[0]), abs(m["y"] - gold[1])):
+                        m["x"], m["y"] = best
+                return
+        dist = self._hero_dist_map()
+        here = dist.get((m["x"], m["y"]), 99)
+        best = min(steps, key=lambda p: dist.get(p, 99))
+        if dist.get(best, 99) < here:
+            m["x"], m["y"] = best
 
     # ------------------------------------------------------------------ 毎ターンの処理 (daemons.c)
     def _doctor(self):
