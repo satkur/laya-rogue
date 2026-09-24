@@ -16,6 +16,8 @@ import random
 import time
 from pathlib import Path
 
+from game import active
+
 WEIGHTS = Path(__file__).parent / "weights"
 TAU = 0.3  # 経験表の評価を確率に直すときの温度。行動 1 つぶんの評価差は 0.3〜1 点と小さいので、1.0 だとほぼ一様になってしまう
 INSTRUCTIONS = "You are the hero of a dungeon crawl. Choose the next action."
@@ -33,6 +35,10 @@ ACTION_DESC = {
     "read_identify": "Read the scroll of identify to learn what one unidentified potion, scroll, wand or ring you carry is.",
     "read_remove_curse": "Read the scroll of remove curse: the cursed ring, armor or weapon you wear can be taken off again.",
     "put_on_ring": "Put on a ring (a known good one first, otherwise an unidentified one); it works while worn, costs food, and may be cursed.",
+    "read_confuse": "Read the scroll of monster confusion: the next enemy you hit in melee becomes confused and wanders.",
+    "read_hold": "Read the scroll of hold monster: the awake enemies within two steps freeze until you hit them.",
+    "drop_scare": "Drop the scroll of scare monster at your feet: while you stand on it, no monster can reach you in melee.",
+    "read_food": "Read the scroll of food detection: you learn where the food on this level lies.",
     "remove_ring": "Take off a ring you wear (a useless one first, otherwise an unidentified one); fails if it is cursed.",
     "zap_attack": "Zap the wand of attack at the enemy in line: a bolt that hurts it badly unless it resists.",
     "zap_slow": "Zap the wand of slow monster at the enemy in line: it then moves only every other turn.",
@@ -71,7 +77,8 @@ def count_word(n):
 
 
 def scroll_words(g):
-    kinds = [w for w, name in (("map", "magic mapping"), ("teleport", "teleportation"), ("identify", "identify"))
+    kinds = [w for w, name in (("map", "magic mapping"), ("teleport", "teleportation"), ("identify", "identify"), ("remove-curse", "remove curse"),
+                               ("confuse", "monster confusion"), ("hold", "hold monster"), ("scare", "scare monster"), ("food-detection", "food detection"))
              if g.scrolls.get(name) and name in g.known]
     return ", ".join(kinds) if kinds else "none"
 
@@ -124,7 +131,7 @@ def item_word(g, it):
 def describe(g, valid):
     """状況文。数値を避けて語彙を絞ってある。品物は近い順に 3 つまで。"""
     mons = g.visible_monsters()
-    items = g.visible_items()
+    items = g.visible_loot()
     parts = [f"Depth: {depth_word(g.depth)}.", f"Experience for this depth: {pace_word(g)}.", f"HP {hp_word(g)}.", f"Hunger: {g.hunger_word()}.",
              f"Food: {count_word(g.food)}.", f"Healing potions: {count_word(g.has_heal())}.",
              f"Missiles: {count_word(sum(g.missiles.values()))}.", f"Scrolls: {scroll_words(g)}.",
@@ -133,11 +140,14 @@ def describe(g, valid):
              f"Wands: {wand_words(g)}.", f"Unidentified wands: {count_word(len(g.unknown_sticks()))}.",
              f"Rings worn: {ring_words(g)}.", f"Unidentified rings carried: {count_word(sum(1 for r in g.rings if r['name'] not in g.known))}."]
     status = [w for w, on in (("confused", g.confused), ("held", g.held_by is not None), ("weakened", g.base_str() < g.max_str),
-                              ("cursed", g.cursed_worn())) if on]
+                              ("cursed", g.cursed_worn()), ("hands glowing", g.glowing)) if on]
     if status:
         parts.append("Status: " + ", ".join(status) + ".")
+    if g.on_scare():
+        parts.append("Standing on: scare monster scroll (monsters cannot reach you here).")
     if mons:
-        seen = ", ".join(f"{m['kind']} {dist_word(g.dist(m['x'], m['y']))} ({threat_word(g, m)}{'' if m['awake'] else ', asleep'})"
+        seen = ", ".join(f"{m['kind']} {dist_word(g.dist(m['x'], m['y']))} ({threat_word(g, m)}{'' if m['awake'] else ', asleep'}"
+                         f"{', held' if m.get('held') else ''}{', confused' if m.get('confused') else ''})"
                          for m in mons[:3])
         parts.append(f"Enemies: {seen}" + (f" and {len(mons) - 3} more." if len(mons) > 3 else "."))
     else:
@@ -156,12 +166,16 @@ def coarse_key(g, valid):
     粗さで経験を集め、Laya には詳しい状況文を読ませて同じ評価を教える。敵は名前ではなく
     「殴り合いの強さ × 特殊攻撃の種別 (盗む / 弱らせる / 動きを封じる / なし)」まで。深さで判断を変えるところは、この表からは学べない。
     """
-    awake = [m for m in g.visible_monsters() if m["awake"]]
+    awake = [m for m in g.visible_monsters() if active(m)]
+    held = [m for m in g.visible_monsters() if m["awake"] and m.get("held")]
     asleep = [m for m in g.visible_monsters() if not m["awake"]]
     if awake:
         rank = {"weak": 0, "even": 1, "deadly": 2}
         worst = max(awake, key=lambda m: (rank[threat_word(g, m)], -g.dist(m["x"], m["y"])))
         enemy = f"{threat_word(g, worst)}-{special_word(worst)}-{dist_word(g.dist(worst['x'], worst['y']))}" + ("+" if len(awake) > 1 else "")
+    elif held:  # 拘束した敵は殴るまで動かない
+        nearest = held[0]
+        enemy = f"held-{threat_word(g, nearest)}-{special_word(nearest)}-{dist_word(g.dist(nearest['x'], nearest['y']))}"
     elif asleep:
         nearest = asleep[0]
         enemy = f"asleep-{threat_word(g, nearest)}-{special_word(nearest)}-{dist_word(g.dist(nearest['x'], nearest['y']))}"
@@ -169,7 +183,7 @@ def coarse_key(g, valid):
         enemy = "none"
     hunger = g.hunger_word()
     flags = "".join(c for c, on in (("H", g.held_by is not None), ("C", g.confused), ("G", bool(g.visible_upgrades())),
-                                     ("K", bool(g.cursed_worn()))) if on)  # G: 良い装備が見えている、K: 呪われた物を着けている
+                                     ("K", bool(g.cursed_worn())), ("S", g.on_scare())) if on)  # G: 良い装備が見えている、K: 呪われた物を着けている、S: 恐怖の巻物の上
     return "|".join([hp_word(g), "starving" if hunger in ("weak", "fainting") else hunger, enemy, flags, pace_word(g), ",".join(valid)])
 
 
@@ -265,7 +279,7 @@ class RuleBrain:
     def decide(self, g):
         valid = g.valid_actions()
         mons = g.visible_monsters()
-        awake = [m for m in mons if m["awake"]]
+        awake = [m for m in mons if active(m)]
         hp = hp_word(g)
         hurt = hp in ("low", "critical")
         deadly = any(threat_word(g, m) == "deadly" for m in awake)
@@ -274,6 +288,10 @@ class RuleBrain:
             a = "quaff_heal"
         elif hp == "critical" and deadly and "read_teleport" in valid:
             a = "read_teleport"
+        elif deadly and "read_hold" in valid:
+            a = "read_hold"
+        elif deadly and "read_confuse" in valid:
+            a = "read_confuse"
         elif deadly and "zap_away" in valid:
             a = "zap_away"
         elif deadly and "zap_slow" in valid:
@@ -288,6 +306,8 @@ class RuleBrain:
             a = "equip"
         elif "eat" in valid and g.hunger_word() != "fine":
             a = "eat"
+        elif g.hunger_word() != "fine" and not g.food and "read_food" in valid:
+            a = "read_food"
         elif g.hunger_word() != "fine" and not g.food and "remove_ring" in valid:  # 食料がないのに指輪で空腹が進む
             a = "remove_ring"
         elif not mons and "read_remove_curse" in valid:
@@ -327,13 +347,17 @@ class DiverBrain:
     def decide(self, g):
         valid = g.valid_actions()
         mons = g.visible_monsters()
-        awake = [m for m in mons if m["awake"]]
+        awake = [m for m in mons if active(m)]
         hp = hp_word(g)
         hurt = hp in ("low", "critical")
         if hurt and "quaff_heal" in valid:
             a = "quaff_heal"
         elif hp == "critical" and "read_teleport" in valid and any(threat_word(g, m) == "deadly" for m in awake):
             a = "read_teleport"
+        elif any(threat_word(g, m) == "deadly" for m in awake) and "read_hold" in valid:
+            a = "read_hold"
+        elif any(threat_word(g, m) == "deadly" for m in awake) and "read_confuse" in valid:
+            a = "read_confuse"
         elif any(threat_word(g, m) == "deadly" for m in awake) and "zap_away" in valid:
             a = "zap_away"
         elif any(threat_word(g, m) == "deadly" for m in awake) and "zap_slow" in valid:
@@ -344,6 +368,8 @@ class DiverBrain:
             a = "zap_unknown"
         elif "eat" in valid and g.hunger_word() != "fine":
             a = "eat"
+        elif g.hunger_word() != "fine" and not g.food and "read_food" in valid:
+            a = "read_food"
         elif g.hunger_word() != "fine" and not g.food and "remove_ring" in valid:  # 食料がないのに指輪で空腹が進む
             a = "remove_ring"
         elif not awake and "quaff_str" in valid:

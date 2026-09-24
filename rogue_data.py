@@ -138,11 +138,16 @@ SCROLL_PROBS = [("monster confusion", 7), ("magic mapping", 4), ("hold monster",
                 ("enchant weapon", 8), ("create monster", 4), ("remove curse", 7), ("aggravate monsters", 3), ("protect armor", 2)]
 # 未識別 (簡略版): 使えば正体が分かる。識別の巻物は本家の 5 種 (薬・巻物・武器・鎧・指輪杖) を 1 種にまとめ、出現率は合算 (43)
 SCROLLS_IN_PLAY = {"enchant armor", "enchant weapon", "protect armor", "magic mapping", "teleportation", "identify",
-                   "sleep", "create monster", "aggravate monsters", "remove curse"}
+                   "sleep", "create monster", "aggravate monsters", "remove curse",
+                   "monster confusion", "hold monster", "scare monster", "food detection"}
 BAD_SCROLLS = {"sleep", "create monster", "aggravate monsters"}
 SCROLL_JP = {"enchant armor": "鎧強化", "enchant weapon": "武器強化", "protect armor": "鎧保護", "magic mapping": "魔法の地図",
              "teleportation": "瞬間移動", "identify": "識別", "sleep": "眠り", "create monster": "怪物召喚", "aggravate monsters": "怪物寄せ",
-             "remove curse": "解呪"}
+             "remove curse": "解呪", "monster confusion": "怪物混乱", "hold monster": "拘束", "scare monster": "恐怖", "food detection": "食料探知"}
+# 戦術の巻物 (NOTES.md 15 章): 怪物混乱 = 読むと手が光り、次に当てた相手が混乱する (4/5 でランダムに動き、そのとき 1/20 で治る)。
+# 拘束 = 周囲 2 マスの起きた敵が止まる (勇者が殴るか怪物寄せで解ける)。恐怖 = 読むのは間違い (笑い声)、床に置いてその上に立つと
+# モンスターがそのマスに入れない (殴ってこない)。一度でも持った恐怖の巻物を拾い直すと塵になる (pack.c)
+HOLD_RANGE = 2
 
 # 指輪 (ring_info の出現率、rings.c、things.c の new_thing)。本家の 14 種すべて。落ちている物の 4%。両手に 1 つずつ着けられる
 # 防御・力・命中・ダメージは値が rnd(3): 0 なら −1 で呪い、1 か 2 なら +1 / +2。怪物寄せ・瞬間移動は常に呪い。呪われた指輪は外せない (解呪の巻物で解ける)

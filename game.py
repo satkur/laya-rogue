@@ -32,6 +32,7 @@ LAMP_DIST = 3
 
 ACTIONS = ["attack", "throw", "approach", "flee", "quaff_heal", "quaff_str", "read_map", "read_teleport",
            "quaff_unknown", "read_unknown", "read_identify", "read_remove_curse", "put_on_ring", "remove_ring",
+           "read_confuse", "read_hold", "drop_scare", "read_food",
            "zap_attack", "zap_slow", "zap_away", "zap_unknown",
            "eat", "pick_up", "equip", "explore", "search", "descend", "rest"]
 
@@ -44,8 +45,13 @@ def avg_dice(dice):
     return sum(n * (s + 1) / 2 for n, s in dice)
 
 
+def active(m):
+    """起きていて動ける敵 (拘束の巻物で止まった敵は脅威ではない。殴ると解ける)。"""
+    return m["awake"] and not m.get("held")
+
+
 HERO_FIELDS = ("kills", "gold", "level", "exp", "str", "max_str", "hp", "max_hp", "food_left", "food", "potions",
-               "weapon", "armor", "gear", "no_food", "missiles", "scrolls", "bow", "known", "sticks", "rings", "worn")
+               "weapon", "armor", "gear", "no_food", "missiles", "scrolls", "bow", "known", "sticks", "rings", "worn", "glowing")
 
 
 class Game:
@@ -85,6 +91,7 @@ class Game:
         self.no_move = 0                        # 熊の罠で歩けない残りターン (攻撃や薬は使える)
         self._fell = False                      # 落とし穴で階を降りた直後 (その手はモンスターが動かない)
         self.confused = 0
+        self.glowing = False                    # 怪物混乱の巻物を読んだ (次に当てた相手が混乱する)
         self.held_by = None                     # ハエトリグサに捕まっているとき、その id
         self.vf_hit = 0
         self.quiet = 0                          # 自然回復のカウンタ
@@ -441,7 +448,15 @@ class Game:
         return sorted((m for m in self.monsters if (m["x"], m["y"]) in self.visible), key=lambda m: self.dist(m["x"], m["y"]))
 
     def visible_items(self):
-        return sorted((i for i in self.items if (i["x"], i["y"]) in self.visible), key=lambda i: self.dist(i["x"], i["y"]))
+        return sorted((i for i in self.items if (i["x"], i["y"]) in self.visible or i.get("sensed")), key=lambda i: self.dist(i["x"], i["y"]))
+
+    def wanted(self, it):
+        """拾いに行く価値のある品か。一度持った恐怖の巻物 (拾うと塵になる) は違う。"""
+        return not (it["kind"] == "scroll" and it["name"] == "scare monster" and it.get("found"))
+
+    def visible_loot(self):
+        """状況文と回収の標的に使う品物 (足元に置いた恐怖の巻物は除く)。"""
+        return [i for i in self.visible_items() if self.wanted(i)]
 
     # ------------------------------------------------------------------ 移動と経路
     def _step_ok(self, x0, y0, x1, y1):
@@ -460,8 +475,8 @@ class Game:
         見えている眠ったモンスターも、それを避けると道がないときだけは通る (踏み込む 1 歩は攻撃になる)。
         避け続けると、唯一の通路で眠る 1 体のせいで探索先も階段もなくなり、餓死するまで足踏みする。"""
         visible = self.visible
-        awake = {(m["x"], m["y"]) for m in self.monsters if (m["x"], m["y"]) in visible and m["awake"]}
-        asleep = {(m["x"], m["y"]) for m in self.monsters if (m["x"], m["y"]) in visible and not m["awake"]}
+        awake = {(m["x"], m["y"]) for m in self.monsters if (m["x"], m["y"]) in visible and active(m)}
+        asleep = {(m["x"], m["y"]) for m in self.monsters if (m["x"], m["y"]) in visible and not active(m)}
         traps = {(t["x"], t["y"]) for t in self.traps if t["found"]}  # 踏んで分かった罠はよける (他に道がなければ踏んで通る)
         path = self._bfs(goal_fn, awake | asleep | traps)
         if path is None and asleep:
@@ -654,11 +669,16 @@ class Game:
     def _hero_attacks(self, m):
         hplus = self.weapon["hplus"] + D.STR_PLUS[self.str] + self.ring_bonus("dexterity") + (0 if m["awake"] else 4)
         m["awake"] = True
+        m.pop("held", None)  # 拘束は殴ると解ける (chase.c の runto)
         hit = False
         for n, s in self.weapon["dice"]:
             if self._swing(self.level, m["arm"], hplus):
                 m["hp"] -= max(0, self.roll(n, s) + self.weapon["dplus"] + D.ADD_DAM[self.str] + self.ring_bonus("increase damage"))
                 hit = True
+        if hit and self.glowing:  # 怪物混乱の巻物: 当てた相手が混乱する (fight.c)
+            self.glowing = False
+            m["confused"] = True
+            self.say(f"手の光が消え、{m['jp']}は混乱した")
         if m["hp"] > 0:
             self.say(f"{m['jp']}に攻撃が{'当たった' if hit else '外れた'}")
             return
@@ -834,7 +854,7 @@ class Game:
 
     def pick_target(self):
         """「回収」で向かう品。方針役の fetch があればその種類の最寄り、なければ良い装備、それも無ければ最寄りの品。"""
-        items = self.visible_items()
+        items = self.visible_loot()
         if not items:
             return None
         if self.pick_kind:
@@ -941,6 +961,7 @@ class Game:
         elif r["name"] == "aggravate monster":
             for m in self.monsters:
                 m["awake"] = True
+                m.pop("held", None)
             self.say("怪物たちが目を覚ました気配がする")
 
     def _remove(self, r):
@@ -1035,7 +1056,7 @@ class Game:
         adjacent = [m for m in mons if self._adjacent(m)]
         free = self.held_by is None and self.no_move == 0
         v = []
-        awake = any(m["awake"] for m in mons)
+        awake = any(active(m) for m in mons)
         if adjacent:
             v.append("attack")
         if self.missiles and self._throw_target():
@@ -1061,6 +1082,14 @@ class Game:
             v.append("read_identify")
         if self.scrolls.get("remove curse") and "remove curse" in self.known and self.cursed_worn():
             v.append("read_remove_curse")
+        if self.scrolls.get("monster confusion") and "monster confusion" in self.known and awake and not self.glowing:
+            v.append("read_confuse")
+        if self.scrolls.get("hold monster") and "hold monster" in self.known and self._hold_targets():
+            v.append("read_hold")
+        if self.scrolls.get("scare monster") and "scare monster" in self.known and not self.on_scare():
+            v.append("drop_scare")
+        if self.scrolls.get("food detection") and "food detection" in self.known and not any(i["kind"] == "food" for i in self.visible_items()):
+            v.append("read_food")
         if len(self.worn) < 2 and self._ring_to_wear():
             v.append("put_on_ring")
         if self._ring_to_remove():
@@ -1073,8 +1102,8 @@ class Game:
                 v.append("zap_unknown")
         if self.food and self.food_left < 1000:
             v.append("eat")
-        if free and self.visible_items():
-            v.append("pick_up")
+        if free and (target := self.pick_target()) and ((target["x"], target["y"]) in self.visible or self._step_toward((target["x"], target["y"]))):
+            v.append("pick_up")  # 探知しただけ (見えていない) の品は、既知の経路で行けるときだけ
         if self._better_gear():
             v.append("equip")
         if free and self._explore_step():
@@ -1236,6 +1265,23 @@ class Game:
                 self._learn(self._unknown_pick(unknown))
             else:
                 self.say("識別の巻物だったが、調べる物がなかった")
+        elif name == "monster confusion":
+            self.glowing = True
+            self.say("手が赤く光りだした (怪物混乱)")
+        elif name == "hold monster":
+            targets = self._hold_targets()
+            for m in targets:
+                m["held"] = True
+            self.say(f"周りの怪物 {len(targets)} 体が動かなくなった (拘束)" if targets else "何かを失った気がした (拘束)")
+        elif name == "scare monster":
+            self.say("遠くで狂ったような笑い声がした (恐怖の巻物は読むと消える)")
+        elif name == "food detection":
+            found = 0
+            for it in self.items:
+                if it["kind"] == "food" and (it["x"], it["y"]) not in self.visible and not it.get("sensed"):
+                    it["sensed"] = True
+                    found += 1
+            self.say(f"鼻がむずむずして、食料の匂いがした ({found} 個)" if found else "鼻がむずむずした (食料探知)")
         elif name == "remove curse":
             for r in self.worn:
                 r["cursed"], r["cursed_known"] = False, False
@@ -1256,11 +1302,24 @@ class Game:
         elif name == "aggravate monsters":
             for m in self.monsters:
                 m["awake"] = True
+                m.pop("held", None)
             self.say("高い音が響き、怪物たちが目を覚ました (怪物寄せ)")
         self._learn(name)
 
+    def _hold_targets(self):
+        """拘束の巻物が効く相手: 周囲 2 マス (5 × 5) にいる起きたモンスター (scrolls.c の S_HOLD)。"""
+        return [m for m in self.monsters if m["awake"] and not m.get("held")
+                and abs(m["x"] - self.hx) <= D.HOLD_RANGE and abs(m["y"] - self.hy) <= D.HOLD_RANGE]
+
     def _adjacent(self, m):
         return (m["x"], m["y"]) in self._nbr[(self.hx, self.hy)]
+
+    def scare_at(self, x, y):
+        return any(i["kind"] == "scroll" and i["name"] == "scare monster" and (i["x"], i["y"]) == (x, y) for i in self.items)
+
+    def on_scare(self):
+        """恐怖の巻物の上に立っている (モンスターはこのマスに入れないので殴ってこない)。"""
+        return self.scare_at(self.hx, self.hy)
 
     def _move_to(self, step):
         if step is None:
@@ -1338,6 +1397,19 @@ class Game:
             self._read("identify")
         elif action == "read_remove_curse" and self.scrolls.get("remove curse") and "remove curse" in self.known:
             self._read("remove curse")
+        elif action == "read_confuse" and self.scrolls.get("monster confusion") and "monster confusion" in self.known:
+            self._read("monster confusion")
+        elif action == "read_hold" and self.scrolls.get("hold monster") and "hold monster" in self.known:
+            self._read("hold monster")
+        elif action == "read_food" and self.scrolls.get("food detection") and "food detection" in self.known:
+            self._read("food detection")
+        elif action == "drop_scare" and self.scrolls.get("scare monster") and "scare monster" in self.known:
+            self.scrolls["scare monster"] -= 1
+            if self.scrolls["scare monster"] <= 0:
+                del self.scrolls["scare monster"]
+            self.items.append(dict(kind="scroll", name="scare monster", x=self.hx, y=self.hy, found=True))
+            self.say("恐怖の巻物を足元に置いた")
+            return False  # 置いた巻物を同じターンに拾わない
         elif action == "put_on_ring" and len(self.worn) < 2:
             r = self._ring_to_wear()
             if r:
@@ -1387,6 +1459,9 @@ class Game:
 
         for it in [i for i in self.items if (i["x"], i["y"]) == (self.hx, self.hy)]:
             self.items.remove(it)
+            if it["kind"] == "scroll" and it["name"] == "scare monster" and it.get("found"):
+                self.say("拾おうとした巻物は塵になった")
+                continue
             if it["kind"] == "gold":
                 self.gold += it["value"]
                 self.say(f"金貨 {it['value']} 枚を拾った")
@@ -1453,6 +1528,8 @@ class Game:
                 continue
             if m.get("slow") and self.turn % 2 == 1:  # 鈍足の杖: 1 ターンおきにしか動けない
                 continue
+            if m.get("held"):  # 拘束の巻物: 殴られるか怪物寄せまで動かない
+                continue
             if m["ch"] == "M" and seen and not m["gazed"]:
                 r = self.room_at(self.hx, self.hy)
                 if (r and not r["dark"]) or self.dist(m["x"], m["y"]) < LAMP_DIST:
@@ -1460,17 +1537,31 @@ class Game:
                     if not self.save(VS_MAGIC):
                         self.confused += self.spread(20)
                         self.say("メデューサの視線で混乱した")
-            if self._adjacent(m):
+            scared = self.on_scare()
+            if self._adjacent(m) and not scared and not m.get("confused"):
                 self._monster_attacks(m)
                 continue
             if m["ch"] == "F":
                 continue
-            occupied = {(o["x"], o["y"]) for o in self.monsters if o is not m} | {(self.hx, self.hy)}
-            steps = [p for p in self._nbr[(m["x"], m["y"])] if p not in occupied]
+            occupied = {(o["x"], o["y"]) for o in self.monsters if o is not m} | ({(self.hx, self.hy)} if scared else set())
+            steps = [p for p in self._nbr[(m["x"], m["y"])] if p not in occupied and not self.scare_at(*p)]
             if not steps:
                 continue
-            if (m["ch"] == "B" and self.rnd(2) == 0) or (m["ch"] == "P" and self.rnd(5) == 0):
-                m["x"], m["y"] = self.rng.choice(steps)  # コウモリとファントムはふらふら動く
+            if (m.get("confused") and self.rnd(5) != 0) or (m["ch"] == "B" and self.rnd(2) == 0) or (m["ch"] == "P" and self.rnd(5) == 0):
+                # 混乱した相手 (4/5) とコウモリ・ファントムはふらふら動く。勇者のマスに踏み込めばそれが攻撃になる (chase.c)
+                if m.get("confused") and self.rnd(20) == 0:
+                    del m["confused"]
+                p = self.rng.choice(steps)
+                if p == (self.hx, self.hy):
+                    self._monster_attacks(m)
+                else:
+                    m["x"], m["y"] = p
+                continue
+            if self._adjacent(m):  # 混乱していて 1/5 で正気に動いたぶん
+                self._monster_attacks(m)
+                continue
+            steps = [p for p in steps if p != (self.hx, self.hy)]
+            if not steps:
                 continue
             dist = self._hero_dist_map()
             here = dist.get((m["x"], m["y"]), 99)

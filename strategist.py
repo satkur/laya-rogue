@@ -30,6 +30,7 @@ import time
 
 import rogue_data as D
 from brain import SPECIAL, dist_word, hp_word, threat_word
+from game import active
 
 DEFAULT_MODEL = "claude-sonnet-5"   # 方針役の既定 (2026-09-24 に Sonnet 5 へ。Opus は過剰。claude -p の --model に渡す)
 PERIOD = 300          # 定期の見回り (ターン)。制約が効いているか、体力や空腹に懸念があるときだけ呼ぶ
@@ -43,7 +44,7 @@ COOLDOWN = 300        # 失敗が 3 回続いたら、このターン数は呼�
 
 PLANS = ["explore_fully", "descend_asap", "free"]
 TACTICS = ["fight", "flee", "escape", "free"]
-READS = ["none", "map", "teleport", "remove_curse"]
+READS = ["none", "map", "teleport", "remove_curse", "confuse", "hold", "scare", "food"]
 RINGS = ["none", "put_on", "remove"]
 TRIES = ["none", "potion", "scroll", "identify"]
 ZAPS = ["none", "attack", "slow", "away", "unknown"]
@@ -76,7 +77,7 @@ Rules of this game (subset of Rogue 5.4.4):
 - Rings (14 kinds as in Rogue 5.4.4, one on each hand): protection +n, add strength +n, dexterity (to-hit) +n, increase damage +n, sustain strength, searching, see invisible, regeneration (+1 HP per turn), slow digestion, stealth (sleeping monsters do not notice the hero), maintain armor (no rust), adornment (nothing), aggravate monster (every monster on every level hunts the hero) and teleportation (random teleport now and then). The last two are always cursed, and the four +n kinds are cursed with -1 one time in three. A cursed ring cannot be taken off until a scroll of remove curse is read. A ring's kind is learned only from a scroll of identify: putting it on tells nothing (the pilot sees "unknown"). Most rings make hunger advance faster (regeneration the most). The pilot has "put_on_ring" (a known good ring first, otherwise an unidentified one), "remove_ring" and "read_remove_curse".
 - Wands (3 kinds, unidentified until zapped, 3-7 charges): attack (a bolt for 6d6 unless the monster resists), slow monster (it moves every other turn), teleport away (it is sent elsewhere on the level). The pilot gets "zap_attack" / "zap_slow" / "zap_away" for known wands and "zap_unknown", only when an awake monster is in a straight line. These are the answer to a monster the hero cannot beat in melee; charges do not come back.
 - Potions and scrolls are unidentified when found (only a color or a title is visible). Using one reveals its kind for the rest of the game; once a kind is known to be useless it is discarded and never picked up again. Kinds in play - potions: healing, extra healing, gain strength, restore strength, poison (strength -1 to -3, restored by restore strength), confusion (20-27 turns of stumbling). Scrolls: enchant armor, enchant weapon, protect armor (read automatically once known), magic mapping, teleportation, identify (reveals one unidentified kind the hero carries), sleep (4-7 turns helpless), create monster (a monster appears next to the hero), aggravate monsters (every monster on the level wakes up and comes). Roughly 3 in 10 unknown potions and 2 in 10 unknown scrolls are harmful. The pilot has "quaff_unknown" / "read_unknown" (tries the unknown kind it carries most of) and "read_identify".
-- Scrolls the strategist can trigger: magic mapping (reveals the whole level including the stairs; useful when the stairs are unknown and the hero needs an exit or is hungry) and teleportation (moves the hero to a random spot on the level, breaking contact with every monster; the one reliable escape when the stairs are unknown).
+- Scrolls the strategist can trigger: magic mapping (reveals the whole level including the stairs; useful when the stairs are unknown and the hero needs an exit or is hungry), teleportation (moves the hero to a random spot on the level, breaking contact with every monster; the one reliable escape when the stairs are unknown), monster confusion (the next monster the hero hits in melee wanders randomly most of the time), hold monster (every awake monster within two steps freezes until the hero hits it - a way to walk away or to shoot it), scare monster (dropped at the hero's feet, "drop_scare": while the hero stands on it no monster can attack in melee, so the hero can rest or shoot; once picked up again it turns to dust) and food detection (shows where the food on this level is).
 - Traps (7 kinds, hidden until stepped on: trap door to the next level, bear trap, sleeping gas, arrow, teleport, poison dart, rust). A trap the hero has stepped on is avoided afterwards. There are no hidden doors.
 - Missiles: the hero starts with a bow and about 30 arrows and may find darts, shuriken, daggers and spears. "throw" is available when an awake monster is in view on a straight line at distance 2 or more; the missile lands next to the target and can be picked up again. Shooting an approaching monster gets 1-3 hits in before melee.
 - HP regenerates slowly (about 1 HP per 10-20 turns at low level, faster later). Resting with no enemy around is the main way to heal. Healing potions are scarce.
@@ -89,7 +90,7 @@ Your outputs:
 - rest: true = when no awake enemy is in view, only rest (or eat / drink / equip) until HP is at least 90%. Ignored while hungry-weak or worse.
 - tactic (only matters while an awake enemy is in view, and resets to "free" when no awake enemy is in view): "fight" = running away on foot is removed; attacking, the stairs and potions stay. "flee" = attacking and approaching are removed (only useful to reach the stairs or to stall a slow/held situation). "escape" = if the stairs are known, walk to them and go down now, ignoring the monster; if they are not known it behaves like "flee". "free" = no constraint. The stairs are never removed by a tactic.
 - heal_now: true = drink a healing potion on the next turn if the hero carries one.
-- read_now: "map" = read magic mapping on the next turn (if carried and the stairs are unknown); "teleport" = read teleportation on the next turn (if carried and an enemy is awake in view); "remove_curse" = read remove curse (if carried and something worn is known to be cursed); "none" = nothing. One-shot.
+- read_now: "map" = read magic mapping on the next turn (if carried and the stairs are unknown); "teleport" = read teleportation on the next turn (if carried and an enemy is awake in view); "remove_curse" = read remove curse (if carried and something worn is known to be cursed); "confuse" / "hold" = read that scroll (if carried and an enemy is awake in view / within two steps); "scare" = drop the scare monster scroll here; "food" = read food detection; "none" = nothing. One-shot.
 - ring_now: "put_on" = put on a ring on the next turn (if one is carried and a hand is free); "remove" = take one off; "none" = nothing. One-shot.
 - zap_now: "attack" / "slow" / "away" = zap that known wand on the next turn if carried and an awake monster is in line; "unknown" = zap an unidentified wand; "none" = nothing. One-shot.
 - try_now: "potion" = drink an unidentified potion on the next turn; "scroll" = read an unidentified scroll; "identify" = read a known scroll of identify; "none" = nothing. One-shot. Testing unknown items is safest with no monster in view, full HP and the stairs known.
@@ -142,7 +143,7 @@ def item_detail(g, it):
 def situation(g, trigger, st):
     """方針役に見せる状況。Laya の状況文と違い、数値をそのまま渡す。"""
     mons = g.visible_monsters()
-    items = g.visible_items()
+    items = g.visible_loot()
     valid = g.valid_actions()
     lines = [
         f"Consulted because: {trigger}.",
@@ -158,11 +159,13 @@ def situation(g, trigger, st):
         f"Wands: {', '.join(f'{n} x{c}' for n, c in g.known_sticks().items()) or 'none'}; unidentified wands: {len(g.unknown_sticks())}. "
         f"Rings worn: {', '.join(ring_detail(g, r) for r in g.worn) or 'none'}. Rings carried: {', '.join(ring_detail(g, r) for r in g.rings) or 'none'}. "
         f"Identified kinds so far: {', '.join(sorted(g.known)) or 'none'}.",
-        "Status: " + (", ".join(w for w, on in (("confused", g.confused), ("held", g.held_by is not None), ("cannot act", g.no_command > 0)) if on) or "normal") + ".",
+        "Status: " + (", ".join(w for w, on in (("confused", g.confused), ("held", g.held_by is not None), ("cannot act", g.no_command > 0),
+                                                ("hands glowing (next hit confuses)", g.glowing), ("standing on a scare monster scroll", g.on_scare())) if on) or "normal") + ".",
     ]
     if mons:
         lines.append("Monsters in view: " + "; ".join(
-            f"{m['kind']} ({'awake' if m['awake'] else 'asleep'}, {dist_word(g.dist(m['x'], m['y']))}, distance {g.dist(m['x'], m['y'])}, "
+            f"{m['kind']} ({'awake' if m['awake'] else 'asleep'}{', held' if m.get('held') else ''}{', confused' if m.get('confused') else ''}, "
+            f"{dist_word(g.dist(m['x'], m['y']))}, distance {g.dist(m['x'], m['y'])}, "
             f"melee estimate: {threat_word(g, m)} - hero kills it in ~{math.ceil(m['hp'] / max(0.05, g.hero_damage_per_turn(m)))} turns, "
             f"it kills hero in ~{math.ceil(g.hp / max(0.05, g.monster_damage_per_turn(m)))} turns, special: {SPECIAL.get(m['ch'], 'none')})" for m in mons[:5]) + ".")
     else:
@@ -241,7 +244,7 @@ class Strategist:
         if not self.enabled or self.stopped:
             return None
         self.trail = (self.trail + [(g.hx, g.hy)])[-STUCK_SPAN:]
-        awake = [m for m in g.visible_monsters() if m["awake"]]
+        awake = [m for m in g.visible_monsters() if active(m)]
         if not awake:
             self.tactic = "free"
         hp, hunger = hp_word(g), g.hunger_word()
@@ -315,7 +318,7 @@ class Strategist:
             return valid
         if self.fetch != "none":  # その種類の品を拾いに行く。敵が起きた・期限切れ・見当たらない (拾った) なら解除
             kind = "stick" if self.fetch == "wand" else self.fetch
-            if any(m["awake"] for m in g.visible_monsters()) or g.turn > self.fetch_until or not any(i["kind"] == kind for i in g.visible_items()):
+            if any(active(m) for m in g.visible_monsters()) or g.turn > self.fetch_until or not any(i["kind"] == kind for i in g.visible_items()):
                 self.fetch = "none"
             elif "pick_up" in valid:
                 g.pick_kind = kind
@@ -325,7 +328,7 @@ class Strategist:
             if "quaff_heal" in valid:
                 return ["quaff_heal"]
         if self.read_now != "none":
-            action, self.read_now = f"read_{self.read_now}", "none"
+            action, self.read_now = ("drop_scare" if self.read_now == "scare" else f"read_{self.read_now}"), "none"
             if action in valid:
                 return [action]
         if self.try_now != "none":
@@ -343,7 +346,7 @@ class Strategist:
             self.ring_now = "none"
             if action in valid:
                 return [action]
-        awake = any(m["awake"] for m in g.visible_monsters())
+        awake = any(active(m) for m in g.visible_monsters())
         drop = set()
         if awake:
             if self.tactic == "fight":  # 徒歩の逃走だけを外す。休憩と階段まで外す形は Laya の成績を下げた (NOTES.md 7 章)
