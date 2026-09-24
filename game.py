@@ -560,12 +560,14 @@ class Game:
         return None
 
     def _look(self):
-        if self.blind:  # 盲目: 自分のマスしか分からない (既知の地図で歩け、立ったマスは手探りで既知になる。そうしないと探索が縁の手前で往復する)
+        if self.blind:  # 盲目: 見えるのは自分のマスだけ (敵も品物も見えない)。周囲 8 マスの地形は手探りで既知になる (そうしないと壁の縁が残って探索が往復する)
             self.visible = {(self.hx, self.hy)}
-            if not self.seen[self.hy][self.hx]:
-                self.seen[self.hy][self.hx] = True
-                self.newly_seen.append((self.hx, self.hy, self.tiles[self.hy][self.hx]))
-                self.explored += 1
+            for x, y in self._nb8.get((self.hx, self.hy), ()) + ((self.hx, self.hy),):
+                if not self.seen[y][x]:
+                    self.seen[y][x] = True
+                    self.newly_seen.append((x, y, RWALL if self.tiles[y][x] == SDOOR else ROCK if self.tiles[y][x] == SPASS else self.tiles[y][x]))
+                    if self.tiles[y][x] != ROCK:
+                        self.explored += 1
             return
         vis = {(self.hx + dx, self.hy + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)
                if 0 <= self.hx + dx < W and 0 <= self.hy + dy < H}
