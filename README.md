@@ -1,13 +1,30 @@
 # laya-rogue
 
-[Laya](https://github.com/NandhaKishorM/laya) にローグライクをプレイさせる個人の実験。目標は地下 20 階。メモは [NOTES.md](NOTES.md)。
+[Laya](https://github.com/NandhaKishorM/laya) にローグライクをプレイさせる個人の実験。メモは [NOTES.md](NOTES.md)。
+
+![一手一手は Laya、方針は claude -p。10 階でアクエイターから鎧を守って逃げ、11 階へ降りる 10 秒](docs/demo.gif)
+
+きっかけは laya-mlx の [Snake デモ](https://mizchi-laya-web-demo.static.hf.space/snake.html)。ローカルで秒間 60 回判断できる小さな AI なら、何かゲームに使えるかもしれないと思った。
+
+そこで Rogue を模したゲームを作り、素の Laya に盤面を読ませてみたが、ランダムより早く死んだ。Laya は文章の分類器で、状況を見て手を変えることができない。
+
+改めて Snake デモのコードを読むと、プランナーが各方向に `Safe. Best route to food.` のような答えを書き、Laya はそれを読んで選んでいるだけの出来レースだった。
+
+自己対戦で集めた経験で判断ヘッドだけを事後学習させると、人間が書いた if 文と同じくらいまで潜れるようになった。推論の速さは変わらない。
+
+とはいえ Snake デモにも planner はあるし、[Minecraft のエンダードラゴン討伐](https://github.com/rmalde/minecraft-agent)も LLM が計画して Jev が即断する分業だった。そこで planner の位置に `claude -p` を置き、一手一手は Laya、全体方針は LLM という形にした。
+
+方針役を付けても成績はまだ変わらない。ただ介入の理由が画面に出るので、見た目はいい感じになった。次に何をするかは未定。
+
+## 遊び方
 
 ```
 uv sync
 uv run learn.py 16 1200
-uv run train.py 16 gen19 30
+uv run train.py 16 gen21 30
 uv run server.py          # http://127.0.0.1:8766/
-uv run sim.py 16 8000 random rules diver table:16 laya:gen19
+uv run server.py --llm    # 方針役つき (Claude Code の claude -p を呼ぶので、ログイン済みの Claude Code が要る)
+uv run sim.py 16 8000 random rules diver table:16 laya:gen21
 ```
 
 Python 3.12 / uv / CUDA 対応 GPU。
