@@ -9,7 +9,8 @@
 未識別は簡略版: 薬と巻物は使うまで正体が分からず (色と題名だけ)、使えば以後ずっと分かる。識別の巻物は 1 種で、持っている未識別の
 1 種類の正体を教える。正体が分かった有害な物 (毒・混乱・眠り・怪物召喚・怪物寄せ) は拾わず、持っていた残りも捨てる。
 どの未識別の物を試すかはプログラムが決める (多く持っている種類から)。「試すか、持ったままにするか」だけが判断。
-隠し扉と「捜索」は実装してあるが切ってある (rogue_data.HIDDEN_DOORS)。入れると本家どおり 3 階以降に出る (扉ごとに rnd(10) + 1 < 階 かつ 1/5)。
+難易度 (NORMAL / HARD / ORIGINAL) は rogue_data.DIFFICULTIES の切替表で、Game は self.rules に持つ (NOTES.md 15 章)。
+隠し扉と「捜索」は実装してあり、NORMAL では切ってある (rules.hidden_doors)。入れると本家どおり 3 階以降に出る (扉ごとに rnd(10) + 1 < 階 かつ 1/5)。
 壁に見え、隣で捜索すると 1 回につき 1/5 で見つかる。「捜索」は 1 手で、行き止まりの通路の先と部屋の壁沿いを順に歩いて探す。
 判断が生まれず、成績と見た目を損ねるだけだったので外した (NOTES.md 9 章)。
 罠は本家の 7 種 (落とし穴・熊の罠・眠りガス・矢・転移・毒ダーツ・錆び) を出現数と効果の数値ごと入れてある。踏むまで見えず、踏んだ罠は以後よける。
@@ -47,12 +48,14 @@ HERO_FIELDS = ("kills", "gold", "level", "exp", "str", "max_str", "hp", "max_hp"
 
 
 class Game:
-    def __init__(self, seed=None, start=None):
+    def __init__(self, seed=None, start=None, difficulty=None):
         """start に hero_state() の結果を渡すと、その勇者でその階から始める (学習で深い階を練習するため)。
-        seed を省略すると乱数で決めて self.seed に残す (デモの地図をあとから sim.py --seeds で再現するため)。"""
+        seed を省略すると乱数で決めて self.seed に残す (デモの地図をあとから sim.py --seeds で再現するため)。
+        difficulty は "normal" / "hard" / "original" (rogue_data.DIFFICULTIES)。省略すると start の難易度、それも無ければ normal。"""
         if seed is None:
             seed = random.randrange(1_000_000)
         self.seed = seed
+        self.rules = D.rules(difficulty or (start["difficulty"] if start else None) or "normal")
         self.rng = random.Random(seed)
         self.depth = 0
         self.turn = 0
@@ -97,7 +100,7 @@ class Game:
         self.new_floor()
 
     def hero_state(self):
-        return {"depth": self.depth, **{k: copy.deepcopy(getattr(self, k)) for k in HERO_FIELDS}}
+        return {"depth": self.depth, "difficulty": self.rules.name, **{k: copy.deepcopy(getattr(self, k)) for k in HERO_FIELDS}}
 
     @staticmethod
     def _item_names(seed):
@@ -177,7 +180,7 @@ class Game:
                 break
         for y in range(H):  # 隠し扉 (rooms.c の door)。つながっていることを確かめたあとで隠す
             for x in range(W):
-                if D.HIDDEN_DOORS and self.tiles[y][x] == DOOR and self.rnd(10) + 1 < self.depth and self.rnd(5) == 0:
+                if self.rules.hidden_doors and self.tiles[y][x] == DOOR and self.rnd(10) + 1 < self.depth and self.rnd(5) == 0:
                     self.tiles[y][x] = SDOOR
         self._populate()
 
@@ -936,7 +939,7 @@ class Game:
             v.append("equip")
         if free and self._explore_step():
             v.append("explore")
-        elif D.HIDDEN_DOORS and free and not self.stairs_known() and self._search_target() is not None:
+        elif self.rules.hidden_doors and free and not self.stairs_known() and self._search_target() is not None:
             v.append("search")
         if free and self.stairs_known() and ((self.hx, self.hy) == self.stairs or self._step_toward(self.stairs)):  # 見えているだけで既知のマスでは繋がっていない階段は選べない (NOTES 13 章)
             v.append("descend")
