@@ -1,8 +1,9 @@
 """画面なしで何回も潜らせて、頭脳ごとの腕前を比べる。目標は地下 26 階 (rogue_data.GOAL_DEPTH)。
 
-    uv run sim.py [回数] [最大ターン] [頭脳...] [--seeds 5003,5007]
+    uv run sim.py [回数] [最大ターン] [頭脳...] [--seeds 5003,5007] [--start 10] [--difficulty normal|hard|original]
 
---seeds を付けると回数の代わりにそのシードだけを回す。頭脳ごとの 1 回ずつの結果は data/results_<頭脳>.json に残る。
+--seeds を付けると回数の代わりにそのシードだけを回す。頭脳ごとの 1 回ずつの結果は data/results_<頭脳>.json に残る
+(normal 以外は results_<頭脳>_<難易度>.json)。--difficulty の既定は normal (NOTES.md 15 章)。
 
 頭脳: random / rules / diver / table:<ラウンド> / laya (未学習) / laya:<世代名>
       @<鋭さ> で行動の引き方を変える (@max で常に最有力、既定は 2.5)
@@ -51,7 +52,7 @@ class Locked:
             return self.brain.decide(g)
 
 
-def play_llm(make_brain, seeds, max_turns, model, start=None):
+def play_llm(make_brain, seeds, max_turns, model, start=None, difficulty="normal"):
     import threading
     from concurrent.futures import ThreadPoolExecutor
 
@@ -65,7 +66,7 @@ def play_llm(make_brain, seeds, max_turns, model, start=None):
 
     def one(seed):
         st = Strategist(model=model)
-        r = play(Guided(Locked(make_brain(), lock), st), seed, max_turns, start)
+        r = play(Guided(Locked(make_brain(), lock), st), seed, max_turns, start, difficulty)
         stats.append(st)
         (DATA / f"llm_{seed}.json").write_text(json.dumps({"result": {k: v for k, v in r.items() if k != "ms"}, "history": st.history},
                                                           ensure_ascii=False, indent=1), encoding="utf-8")
@@ -105,8 +106,8 @@ def standard_hero(depth):
 STALL_TURNS, STALL_TILES = 300, 4  # この連続ターン数のあいだ踏んだマスが STALL_TILES 種類以下で、休憩も戦闘もしておらず、起きた敵も見えていなければ「行き詰まり」
 
 
-def play(brain, seed, max_turns, start=None):
-    g = Game(seed, standard_hero(start) if start else None)
+def play(brain, seed, max_turns, start=None, difficulty="normal"):
+    g = Game(seed, standard_hero(start) if start else None, difficulty)
     if hasattr(brain, "rng"):  # 行動を引く乱数もゲームごとにシードで決める。共有したままだと同じ重みでも並べる順で結果が変わる
         brain.rng = random.Random(seed)
     ms, miss, n = [], 0, 0
@@ -130,8 +131,8 @@ def play(brain, seed, max_turns, start=None):
 
 
 def _cpu_job(args):
-    spec, seed, max_turns, start = args
-    return play(make_cpu_brain(spec), seed, max_turns, start)
+    spec, seed, max_turns, start, difficulty = args
+    return play(make_cpu_brain(spec), seed, max_turns, start, difficulty)
 
 
 def band_deaths(rs):
@@ -169,12 +170,18 @@ def main():
         i = argv.index("--start")
         start = int(argv[i + 1])
         del argv[i:i + 2]
+    difficulty = "normal"
+    if "--difficulty" in argv:
+        i = argv.index("--difficulty")
+        difficulty = argv[i + 1]
+        del argv[i:i + 2]
+    D.rules(difficulty)  # 名前の検査
     runs = int(argv[0]) if argv else 20
     max_turns = int(argv[1]) if len(argv) > 1 else 8000
     specs = argv[2:] or ["random", "rules"]
     seeds = seeds or [5000 + i for i in range(runs)]
     runs = len(seeds)
-    print(f"{runs} 回 × 最大 {max_turns} ターン (全頭脳で同じシード)" + (f"、B{start}F から標準の勇者で開始" if start else "") + "\n")
+    print(f"{runs} 回 × 最大 {max_turns} ターン (全頭脳で同じシード、難易度 {difficulty.upper()})" + (f"、B{start}F から標準の勇者で開始" if start else "") + "\n")
     laya = None
     for full in specs:
         t0 = time.perf_counter()
@@ -189,14 +196,16 @@ def main():
             else:
                 laya.load_generation(gen)
             laya.sharpness = sharpness
-            results = play_llm(lambda: laya, seeds, max_turns, llm, start) if llm else [play(laya, s, max_turns, start) for s in seeds]
+            results = play_llm(lambda: laya, seeds, max_turns, llm, start, difficulty) if llm else [play(laya, s, max_turns, start, difficulty) for s in seeds]
         elif llm:
-            results = play_llm(lambda: make_cpu_brain(spec), seeds, max_turns, llm, start)
+            results = play_llm(lambda: make_cpu_brain(spec), seeds, max_turns, llm, start, difficulty)
         else:
             with ProcessPoolExecutor() as pool:
-                results = list(pool.map(_cpu_job, [(spec, s, max_turns, start) for s in seeds], chunksize=2))
+                results = list(pool.map(_cpu_job, [(spec, s, max_turns, start, difficulty) for s in seeds], chunksize=2))
         if start:
             full += f"@B{start}"
+        if difficulty != "normal":
+            full += f"_{difficulty}"
         report(full, results, time.perf_counter() - t0)
         stalled = [(s, r["stalls"]) for s, r in zip(seeds, results) if r.get("stalls")]
         if stalled:

@@ -19,7 +19,37 @@ WANDER_TIME = 70         # 徘徊モンスターの出現間隔の基準 (spread
 TRAPS = [("trap door", "落とし穴"), ("bear trap", "熊の罠"), ("sleeping gas", "眠りガス"), ("arrow trap", "矢の罠"),
          ("teleport trap", "転移の罠"), ("dart trap", "毒ダーツ"), ("rust trap", "錆びの罠")]
 MAXTRAPS = 10
-HIDDEN_DOORS = False     # 隠し扉と「捜索」を出すか。判断が生まれず成績と見た目を損ねるだけだったので切ってある (NOTES.md 9〜10 章)
+
+# 難易度 3 種 (NOTES.md 15 章)。ORIGINAL = 本家そのもの、NORMAL = 判断が生まれない運の要素を抜いたもの、HARD = 内容は ORIGINAL で識別だけ簡略。
+# ここには「出すか出さないか」の切替だけを置く。数値は上下の表のとおりで難易度によらない。Game(seed, start, difficulty) が rules(名前) を持つ
+DIFFICULTIES = {
+    "normal": dict(
+        hidden_doors=False,      # 隠し扉と「捜索」(NOTES.md 9〜10 章: 判断が生まれず成績と見た目を損ねるだけだった)
+    ),
+    "hard": dict(
+        hidden_doors=True,
+    ),
+    "original": dict(
+        hidden_doors=True,
+    ),
+}
+
+
+class Rules:
+    """難易度 1 つぶんの切替。属性で読む (rules.hidden_doors)。"""
+
+    def __init__(self, name):
+        self.name = name
+        self.__dict__.update(DIFFICULTIES[name])
+
+    def __repr__(self):
+        return f"Rules({self.name})"
+
+
+def rules(name="normal"):
+    return Rules(name)
+
+
 SEARCH_CAPS = (20, 6)    # 同じマスで捜索する回数の上限 (本家にはない): 通路の行き止まり / 部屋の壁ぎわ。
                          # 見つかる確率は 1 回 1/5 なので、20 回で 99%、6 回で 74%。全部使い切ったら、回数の少ない所から順に探し続ける
 BEARTIME = 3             # 熊の罠で動けないターン数 (rogue.h: spread(3))

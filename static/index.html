@@ -164,8 +164,8 @@
       </div>
     </fieldset>
     <fieldset>
-      <legend>世代別の成績</legend>
-      <table><thead><tr><th>世代</th><th>挑戦</th><th>平均到達</th><th>最深</th><th>平均撃破</th></tr></thead><tbody id="genStats"></tbody></table>
+      <legend>難易度別の成績</legend>
+      <table><thead><tr><th>難易度</th><th>挑戦</th><th>平均到達</th><th>最深</th><th>平均撃破</th></tr></thead><tbody id="genStats"></tbody></table>
     </fieldset>
     <fieldset><legend>ログ</legend><div id="log"></div></fieldset>
   </aside>
@@ -175,7 +175,7 @@
   <button id="step"><kbd>.</kbd>1手進める</button>
   <button id="restart"><kbd>R</kbd>最初から</button>
   <div class="orders">命令 <span id="orders"></span></div>
-  <div class="gens">世代 <span id="gens"></span></div>
+  <div class="gens">難易度 <span id="gens"></span></div>
   <div class="adviser"><button id="adviserBtn"><kbd>L</kbd><span>方針役</span></button></div>
   <div class="spacer"></div>
   <label>SPEED <input type="range" id="speed" min="0" max="100" value="62"> <b id="speedv"></b></label>
@@ -207,8 +207,8 @@ const FONT = '"DotGothic16", "MS Gothic", monospace';
 let GW = 48, GH = 26, T = 20;
 let tiles = [], lit = new Set(), hero = null, heroDraw = null, monsters = new Map(), items = [], traps = [], floats = [], danger = 0, shake = 0, flash = 0;
 const stats = { stamps: [], ms: [] };
-const genStats = new Map();   // 世代名 -> { runs, depth, best, kills }
-let generation = null;
+const genStats = new Map();   // 難易度 -> { runs, depth, best, kills }
+let generation = null, difficulty = "normal";
 const genLabel = g => g ?? "未学習";
 
 // ---------------------------------------------------------------- websocket
@@ -217,20 +217,20 @@ const send = o => ws.readyState === 1 && ws.send(JSON.stringify(o));
 ws.onclose = () => { $("device").textContent = "切断されました（server.py を再起動してください）"; };
 ws.onmessage = ev => {
   const m = JSON.parse(ev.data);
-  if (m.type === "hello") { GW = m.w; GH = m.h; $("device").textContent = ""; resize(); pushConfig(); setupGenerations(m.generations, m.generation); setupOrders(m.orders, m.order); setAdviser(m.adviser); }
+  if (m.type === "hello") { GW = m.w; GH = m.h; $("device").textContent = ""; resize(); pushConfig(); generation = m.generation; $("genNow").textContent = genLabel(generation); setupDifficulties(m.difficulties, m.difficulty); setupOrders(m.orders, m.order); setAdviser(m.adviser); }
   else if (m.type === "adviser") setAdviser(m.adviser);
   else if (m.type === "thinking") { $("adviser").classList.add("thinking"); $("reason").textContent = `方針役が考え中… (${TRIGGER_JP[m.kind] ?? m.kind})`; }
   else if (m.type === "advice") onAdvice(m);
   else if (m.type === "order") setOrder(m.order, true);
-  else if (m.type === "generation") setGeneration(m.generation);
+  else if (m.type === "difficulty") setDifficulty(m.difficulty);
   else if (m.type === "floor") { tiles = Array.from({ length: GH }, () => new Array(GW).fill(-1)); monsters.clear(); hero = null; heroDraw = null; $("died").classList.remove("show"); }
   else if (m.type === "frame") onFrame(m);
   else if (m.type === "end") {
     shake = m.won ? 0 : 1;
-    const gs = genStats.get(genLabel(m.generation)) ?? { runs: 0, depth: 0, best: 0, kills: 0 };
+    const gs = genStats.get(m.difficulty) ?? { runs: 0, depth: 0, best: 0, kills: 0 };
     gs.runs++; gs.depth += m.depth; gs.kills += m.kills; gs.best = Math.max(gs.best, m.depth);
-    genStats.set(genLabel(m.generation), gs); renderGenStats();
-    $("diedTitle").textContent = m.won ? "B20F 到達！" : "LAYA DIED";
+    genStats.set(m.difficulty, gs); renderGenStats();
+    $("diedTitle").textContent = m.won ? `B${m.depth}F 到達！` : "LAYA DIED";
     $("diedSub").textContent = (m.won ? "" : `死因: ${m.cause} / `) + `B${m.depth}F / Lv${m.level} / 撃破 ${m.kills} / 金貨 ${m.gold} / ${m.turn} ターン`;
     $("died").classList.toggle("won", m.won);
     $("died").classList.add("show");
@@ -287,27 +287,26 @@ function setOrder(name, shout) {
   $("order").textContent = ORDER_JP[name] ?? name;
   if (shout && hero) floats.push({ x: hero.x, y: hero.y - 1, text: `「${ORDER_JP[name]}！」`, c: "#ecd07a", life: 1.1, vy: -0.9 });
 }
-function setupGenerations(list, current) {
+function setupDifficulties(list, current) {
   $("gens").innerHTML = "";
-  for (const name of [null, ...list]) {
+  for (const name of list) {
     const b = document.createElement("button");
-    b.textContent = genLabel(name); b.dataset.gen = name ?? "";
-    b.onclick = () => send({ type: "generation", name });
+    b.textContent = name.toUpperCase(); b.dataset.gen = name;
+    b.onclick = () => send({ type: "difficulty", name });
     $("gens").appendChild(b);
   }
-  setGeneration(current);
+  setDifficulty(current);
 }
-function setGeneration(name) {
-  generation = name;
-  for (const b of $("gens").children) b.classList.toggle("on", b.dataset.gen === (name ?? ""));
-  $("genNow").textContent = genLabel(name);
+function setDifficulty(name) {
+  difficulty = name;
+  for (const b of $("gens").children) b.classList.toggle("on", b.dataset.gen === name);
   renderGenStats();
 }
 function renderGenStats() {
-  const names = [...$("gens").children].map(b => genLabel(b.dataset.gen || null));
+  const names = [...$("gens").children].map(b => b.dataset.gen);
   $("genStats").innerHTML = names.map(n => {
     const s = genStats.get(n);
-    return `<tr class="${n === genLabel(generation) ? "now" : ""}"><td>${n}</td><td>${s ? s.runs : "–"}</td><td>${s ? "B" + (s.depth / s.runs).toFixed(1) + "F" : "–"}</td><td>${s ? "B" + s.best + "F" : "–"}</td><td>${s ? (s.kills / s.runs).toFixed(1) : "–"}</td></tr>`;
+    return `<tr class="${n === difficulty ? "now" : ""}"><td>${n.toUpperCase()}</td><td>${s ? s.runs : "–"}</td><td>${s ? "B" + (s.depth / s.runs).toFixed(1) + "F" : "–"}</td><td>${s ? "B" + s.best + "F" : "–"}</td><td>${s ? (s.kills / s.runs).toFixed(1) : "–"}</td></tr>`;
   }).join("");
 }
 function delayFromSlider() { const v = +$("speed").value; return v >= 100 ? 0 : Math.pow(1 - v / 100, 2.2) * 1.0; }
