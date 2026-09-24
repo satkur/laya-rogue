@@ -126,8 +126,9 @@ def play(brain, seed, max_turns, start=None, difficulty="normal"):
                 and not ({"rest", "attack", "throw"} & set(acts[-STALL_TURNS:])) and not any(m["awake"] for m in g.visible_monsters())):
             stalls.append([g.depth, g.turn])
             stall_depth = g.depth  # 同じ階では 1 回だけ記録
-    end = "到達" if g.won else g.cause if g.dead else "時間切れ"
-    return dict(depth=g.depth, level=g.level, kills=g.kills, gold=g.gold, turn=g.turn, end=end, ms=ms, miss=miss / max(1, n), stalls=stalls)
+    end = ("帰還" if g.rules.amulet else "到達") if g.won else g.cause if g.dead else "時間切れ"
+    return dict(depth=g.max_depth, level=g.level, kills=g.kills, gold=g.gold, turn=g.turn, end=end, ms=ms, miss=miss / max(1, n), stalls=stalls,
+                amulet=g.amulet, final_depth=g.depth)
 
 
 def _cpu_job(args):
@@ -140,7 +141,7 @@ def band_deaths(rs):
     out = []
     for lo, hi in ((1, 4), (5, 8), (9, 12), (13, 99)):
         arrivals = sum(max(0, min(r["depth"], hi) - lo + 1) for r in rs)
-        deaths = sum(1 for r in rs if r["end"] not in ("到達", "時間切れ") and lo <= r["depth"] <= hi)
+        deaths = sum(1 for r in rs if r["end"] not in ("到達", "帰還", "時間切れ") and lo <= r.get("final_depth", r["depth"]) <= hi)
         out.append(f"{lo}-{hi if hi < 99 else ''}: {deaths / arrivals:.0%}" if arrivals else f"{lo}-: -")
     return " ".join(out)
 
@@ -152,7 +153,8 @@ def report(name, rs, dt):
     ends = Counter(r["end"] for r in rs)
     se = statistics.stdev(depth) / len(depth) ** 0.5 if len(depth) > 1 else 0.0
     print(f"[{name:24s}] 到達階 平均 {statistics.mean(depth):5.2f} ±{se:.2f} 中央 {statistics.median(depth):4.1f} 最高 {max(depth):2d} | "
-          f"10階+ {sum(d >= 10 for d in depth):2d} 到達 {ends['到達']:2d} /{len(rs)} | Lv {statistics.mean(r['level'] for r in rs):4.1f} | "
+          f"10階+ {sum(d >= 10 for d in depth):2d} 到達 {ends['到達'] + ends['帰還']:2d} /{len(rs)}" + (f" 魔除け {sum(r.get('amulet', False) for r in rs)}" if any(r.get('amulet') for r in rs) else "")
+          + f" | Lv {statistics.mean(r['level'] for r in rs):4.1f} | "
           f"撃破 {statistics.mean(r['kills'] for r in rs):5.1f} | 金貨 {statistics.mean(r['gold'] for r in rs):5.0f} | ターン {statistics.mean(r['turn'] for r in rs):5.0f}"
           + (f" | 推論 {statistics.median(ms):.1f} ms" if ms else "") + (f" | 表にない状況 {miss:.0%}" if miss else "") + f" | {dt:.0f}s", flush=True)
     print("    終わり方: " + " ".join(f"{k}×{v}" for k, v in ends.most_common(7)) + " | 死亡率 " + band_deaths(rs), flush=True)

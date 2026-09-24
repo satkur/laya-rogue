@@ -81,9 +81,9 @@ Rules of this game (subset of Rogue 5.4.4):
 - The bow must be wielded ("wield_bow") for arrows to hit hard; while it is wielded the hero is nearly helpless in melee (1d1) until "wield_melee". Other missiles (darts, shuriken, daggers, spears) need no bow.
 - Rings (14 kinds as in Rogue 5.4.4, one on each hand): protection +n, add strength +n, dexterity (to-hit) +n, increase damage +n, sustain strength, searching, see invisible, regeneration (+1 HP per turn), slow digestion, stealth (sleeping monsters do not notice the hero), maintain armor (no rust), adornment (nothing), aggravate monster (every monster on every level hunts the hero) and teleportation (random teleport now and then). The last two are always cursed, and the four +n kinds are cursed with -1 one time in three. A cursed ring cannot be taken off until a scroll of remove curse is read. A ring's kind is learned only from a scroll of identify: putting it on tells nothing (the pilot sees "unknown"). Most rings make hunger advance faster (regeneration the most). The pilot has "put_on_ring" (a known good ring first, otherwise an unidentified one), "remove_ring" and "read_remove_curse".
 - Wands (all 14 kinds of Rogue 5.4.4, unidentified until zapped, 3-7 charges): lightning / fire / cold ("zap_bolt": a bolt for 6d6 unless the monster resists, bounces off walls and can hit the hero), magic missile (1d4+1, nearly always hits), slow monster (it moves every other turn), teleport away (it is sent elsewhere on the level), polymorph (it becomes a random other monster), drain life (the hero loses half of the HP and the monsters in the room share that damage), cancellation (removes a monster's special power: rust, freeze, poison, drain, hold, steal, gaze, flame), light (lights a dark room), and the useless or harmful invisibility, haste monster, teleport to and nothing (never zapped once known). Directional wands need an awake monster in a straight line. These are the answer to a monster the hero cannot beat in melee; charges do not come back.
-- Potions and scrolls are unidentified when found (only a color or a title is visible). Using one reveals its kind for the rest of the game; once a kind is known to be useless it is discarded and never picked up again. Kinds in play - potions (all 14 of Rogue 5.4.4; at NORMAL difficulty blindness and hallucination do not appear): healing (also cures blindness), extra healing (also cures confusion and hallucination), gain strength, restore strength, poison (strength -1 to -3, restored by restore strength), confusion (20-27 turns of stumbling), haste self (4-7 turns of two actions per turn; a second one while hasted makes the hero faint), raise level, see invisible (phantoms are invisible without it), monster detection (senses every monster on the level for about 20 turns), magic detection (shows where the magic items on the level are), levitation (about 30 turns: cannot take stairs or pick up, does not spring traps), blindness (about 850 turns of seeing nothing), hallucination (about 850 turns: the pilot cannot tell what monsters and items are). Scrolls: enchant armor, enchant weapon, protect armor (read automatically once known), magic mapping, teleportation, identify (reveals one unidentified kind the hero carries), remove curse, monster confusion, hold monster, scare monster, food detection, sleep (4-7 turns helpless), create monster (a monster appears next to the hero), aggravate monsters (every monster on the level wakes up and comes). Roughly 3 in 10 unknown potions and 2 in 10 unknown scrolls are harmful. The pilot has "quaff_unknown" / "read_unknown" (tries the unknown kind it carries most of) and "read_identify".
+- Potions and scrolls are unidentified when found (only a color or a title is visible). Using one reveals its kind for the rest of the game; once a kind is known to be useless it is never used again (the pilot keeps it but never walks to another). Kinds in play - potions (all 14 of Rogue 5.4.4; at NORMAL difficulty blindness and hallucination do not appear): healing (also cures blindness), extra healing (also cures confusion and hallucination), gain strength, restore strength, poison (strength -1 to -3, restored by restore strength), confusion (20-27 turns of stumbling), haste self (4-7 turns of two actions per turn; a second one while hasted makes the hero faint), raise level, see invisible (phantoms are invisible without it), monster detection (senses every monster on the level for about 20 turns), magic detection (shows where the magic items on the level are), levitation (about 30 turns: cannot take stairs or pick up, does not spring traps), blindness (about 850 turns of seeing nothing), hallucination (about 850 turns: the pilot cannot tell what monsters and items are). Scrolls: enchant armor, enchant weapon, protect armor (read automatically once known), magic mapping, teleportation, identify (reveals one unidentified kind the hero carries), remove curse, monster confusion, hold monster, scare monster, food detection, sleep (4-7 turns helpless), create monster (a monster appears next to the hero), aggravate monsters (every monster on the level wakes up and comes). Roughly 3 in 10 unknown potions and 2 in 10 unknown scrolls are harmful. The pilot has "quaff_unknown" / "read_unknown" (tries the unknown kind it carries most of) and "read_identify".
 - Scrolls the strategist can trigger: magic mapping (reveals the whole level including the stairs; useful when the stairs are unknown and the hero needs an exit or is hungry), teleportation (moves the hero to a random spot on the level, breaking contact with every monster; the one reliable escape when the stairs are unknown), monster confusion (the next monster the hero hits in melee wanders randomly most of the time), hold monster (every awake monster within two steps freezes until the hero hits it - a way to walk away or to shoot it), scare monster (dropped at the hero's feet, "drop_scare": while the hero stands on it no monster can attack in melee, so the hero can rest or shoot; once picked up again it turns to dust) and food detection (shows where the food on this level is).
-- Traps (7 kinds, hidden until stepped on: trap door to the next level, bear trap, sleeping gas, arrow, teleport, poison dart, rust). A trap the hero has stepped on is avoided afterwards. There are no hidden doors.
+- Traps (7 kinds, hidden until stepped on: trap door to the next level, bear trap, sleeping gas, arrow, teleport, poison dart, rust). A trap the hero has stepped on is avoided afterwards.
 - Missiles: the hero starts with a bow and about 30 arrows and may find darts, shuriken, daggers and spears. "throw" is available when an awake monster is in view on a straight line at distance 2 or more; the missile lands next to the target and can be picked up again. Shooting an approaching monster gets 1-3 hits in before melee.
 - HP regenerates slowly (about 1 HP per 10-20 turns at low level, faster later). Resting with no enemy around is the main way to heal. Healing potions are scarce.
 - Hunger: one ration lasts about 1300 turns; "hungry" -> "weak" -> "fainting" -> starvation. Food lies on the floor of unexplored areas; each new level is a fresh chance to find some.
@@ -91,7 +91,7 @@ Rules of this game (subset of Rogue 5.4.4):
 - Special attacks: aquator rusts armor (permanent, armor is what keeps the hero alive deeper down); rattlesnake poison lowers strength; wraith drains a level; vampire drains max HP; ice monster freezes; venus flytrap holds (cannot move away, must kill it); leprechaun steals gold; nymph steals a potion; medusa confuses. Sleeping monsters are hit more easily; "mean" ones (hobgoblin, troll, quagga, rattlesnake, orc...) usually wake up when they notice the hero.
 
 Your outputs:
-- plan: "explore_fully" = do not take the stairs while unexplored area remains (more items and experience, but more wandering monsters). "descend_asap" = once the stairs are known, stop exploring and picking up, go down. "free" = no constraint.
+- plan: "explore_fully" = do not take the stairs while unexplored area remains (more items and experience, but more wandering monsters). "descend_asap" = once the stairs are known, stop exploring and picking up, take the stairs (down, or up when the hero carries the Amulet). "free" = no constraint.
 - rest: true = when no awake enemy is in view, only rest (or eat / drink / equip) until HP is at least 90%. Ignored while hungry-weak or worse.
 - tactic (only matters while an awake enemy is in view, and resets to "free" when no awake enemy is in view): "fight" = running away on foot is removed; attacking, the stairs and potions stay. "flee" = attacking and approaching are removed (only useful to reach the stairs or to stall a slow/held situation). "escape" = if the stairs are known, walk to them and go down now, ignoring the monster; if they are not known it behaves like "flee". "free" = no constraint. The stairs are never removed by a tactic.
 - heal_now: true = drink a healing potion on the next turn if the hero carries one.
@@ -126,18 +126,32 @@ def ring_detail(g, r):
     return f"{r['name']}" + (f" {r['value']:+d}" if r["name"] in D.RING_VALUED else "") + (" (cursed)" if g.ring_known_cursed(r) else "")
 
 
+DIFFICULTY_NOTES = {
+    "normal": "Difficulty NORMAL: the goal is to reach dungeon level {goal} alive. Compared with Rogue 5.4.4 there are no hidden doors or passages, no maze rooms, no xeroc mimics, and the potions of blindness and hallucination do not exist. Scrolls of identify are one kind that identifies anything, using an item always reveals its kind, and the bonus of weapons and armor on the floor is visible.",
+    "hard": "Difficulty HARD: the goal is to find the Amulet of Yendor (it lies on level 26 or deeper), then climb back to the surface (\"ascend\" from level 1 wins). Hidden doors, maze rooms and xeroc mimics exist as in Rogue 5.4.4. Scrolls of identify are one kind that identifies anything, using an item always reveals its kind, and the bonus of weapons and armor on the floor is visible.",
+    "original": "Difficulty ORIGINAL: Rogue 5.4.4 as it is. The goal is to find the Amulet of Yendor (it lies on level 26 or deeper), then climb back to the surface (\"ascend\" from level 1 wins). Hidden doors and passages, maze rooms and xeroc mimics exist. The five scrolls of identify each identify one category. Using an item reveals its kind only when the effect could be observed (otherwise it is marked as tried). The bonus of armor is learned by wearing it, that of a weapon only by a scroll of identify weapon. The pack holds 23 slots (\"drop\" discards a useless item).",
+}
+
+
+def system_for(rules):
+    """難易度ごとの説明を付けた SYSTEM (NOTES.md 15 章: Rules と Kinds in play を難易度に合わせる)。"""
+    return SYSTEM + "\n" + DIFFICULTY_NOTES[rules.name].format(goal=D.GOAL_DEPTH)
+
+
 def item_detail(g, it):
     """方針役に見せる品物: 名前と数値、着ている物との比較、距離 (床の上の品のみ)。"""
     k = it["kind"]
     if k == "armor":
         gain = g.gear_gain(it)
-        s = f"{it['name']} (AC {it['ac']}, {'better' if gain > 0 else 'worse'} than worn by {abs(gain)})"
+        s = f"{it['name']} ({'AC ' + str(it['ac']) if it.get('known', True) else 'bonus unknown until worn'}, {'better' if gain > 0 else 'worse'} than worn by {abs(gain)})"
     elif k == "weapon":
         gain = g.gear_gain(it)
-        s = f"{it['name']} ({dice_text(it)}, {'better' if gain > 0 else 'worse'} than worn by {abs(gain):.1f})"
+        s = f"{it['name']} ({dice_text(it) if it.get('known', True) else 'bonus unknown'}, {'better' if gain > 0 else 'worse'} than worn by {abs(gain):.1f})"
     elif k in ("potion", "scroll", "stick", "ring"):
         kind = "wand" if k == "stick" else k
-        s = f"{kind} of {it['name']}" if it["name"] in g.known else f"unidentified {kind}"
+        s = f"{kind} of {it['name']}" if it["name"] in g.known else f"unidentified {kind}" + (" (tried before)" if it["name"] in g.tried else "")
+    elif k == "amulet":
+        s = "the Amulet of Yendor"
     elif k == "gold":
         s = f"gold ({it['value']})"
     elif k == "missile":
@@ -190,6 +204,11 @@ def situation(g, trigger, st):
                  f"{', cursed' if g.weapon.get('cursed_known') else ''}). This level: {g.explored_ratio():.0%} explored.")
     stairs = f"known, {max(abs(g.hx - g.stairs[0]), abs(g.hy - g.stairs[1]))} steps away" if g.seen[g.stairs[1]][g.stairs[0]] else "not found yet"
     lines.append(f"Stairs: {stairs}. Unexplored area on this level: {'yes' if 'explore' in valid else 'no'}.")
+    if g.rules.amulet:
+        lines.append("Amulet of Yendor: " + ("carried - climb back to the surface." if g.amulet else f"not yet found (deepest level so far {g.max_depth}).")
+                     + (f" Pack: {g.pack_count()}/{g.rules.pack_limit} slots." if g.rules.pack_limit else ""))
+    if g.tried:
+        lines.append("Tried but not identified: " + ", ".join(sorted(g.names[k] for k in g.tried)) + ".")
     if g.gear:
         lines.append("Carried but not worn: " + ", ".join(item_detail(g, x) for x in g.gear) + ".")
     lines.append(f"Decision in force: plan={st.plan}, rest={st.rest}, tactic={st.tactic}, fetch={st.fetch}.")
@@ -200,11 +219,11 @@ def situation(g, trigger, st):
     return "\n".join(lines)
 
 
-def ask(text, model=DEFAULT_MODEL, effort="high"):
+def ask(text, model=DEFAULT_MODEL, effort="high", system=SYSTEM):
     """claude -p を 1 回呼ぶ。戻り値は (決定の dict, 秒数, 使用トークン)。失敗したら例外。"""
     if os.environ.get("ANTHROPIC_API_KEY"):
         raise RuntimeError("ANTHROPIC_API_KEY があると従量課金になるので呼ばない")
-    cmd = ["claude", "-p", "--model", model, "--effort", effort, "--output-format", "json", "--system-prompt", SYSTEM,
+    cmd = ["claude", "-p", "--model", model, "--effort", effort, "--output-format", "json", "--system-prompt", system,
            "--tools", "", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence",
            "--json-schema", json.dumps(SCHEMA)]
     t0 = time.perf_counter()
@@ -305,7 +324,7 @@ class Strategist:
         self.calls += 1
         total_calls += 1
         try:
-            d, sec, tokens = self.asker(situation(g, trigger, self), self.model, self.effort)
+            d, sec, tokens = self.asker(situation(g, trigger, self), self.model, self.effort, system_for(g.rules))
         except Exception as e:  # noqa: BLE001  失敗しても Laya は動き続ける
             self.errors += 1
             if self.errors >= 3:  # 制約は外して、しばらく Laya だけで進む
@@ -380,14 +399,16 @@ class Strategist:
             elif self.tactic == "flee":
                 drop |= {"attack", "approach"}
             elif self.tactic == "escape":
+                if "ascend" in valid and g.amulet:
+                    return ["ascend"]
                 if "descend" in valid:
                     return ["descend"]
                 drop |= {"attack", "approach"}
         elif self.rest and g.hp < 0.9 * g.max_hp and g.hunger_word() in ("fine", "hungry"):
             drop |= {"approach", "pick_up", "explore", "descend"}
         if self.plan == "explore_fully" and "explore" in valid:
-            drop.add("descend")
-        elif self.plan == "descend_asap" and "descend" in valid and not awake:
+            drop |= {"descend", "ascend"}
+        elif self.plan == "descend_asap" and ("descend" in valid or "ascend" in valid) and not awake:
             drop |= {"explore", "pick_up"}
         kept = [a for a in valid if a not in drop]
         return kept or valid

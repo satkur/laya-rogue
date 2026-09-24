@@ -193,6 +193,7 @@ const JP = { attack: "攻撃", throw: "投擲", approach: "接近", flee: "逃�
              zap_bolt: "稲妻/炎/冷気の杖", zap_missile: "魔法の矢の杖", zap_slow: "鈍足の杖", zap_away: "追放の杖", zap_polymorph: "変身の杖",
              zap_drain: "生命吸収の杖", zap_cancel: "無効化の杖", zap_light: "光の杖", zap_unknown: "未識別の杖",
              read_enchant_armor: "鎧強化の巻物", read_enchant_weapon: "武器強化の巻物", read_protect: "鎧保護の巻物", wield_bow: "弓を構える", wield_melee: "武器を構える",
+             ascend: "上の階段へ", drop: "不要品を捨てる",
              eat: "食事", pick_up: "回収",
              equip: "装備", explore: "探索", search: "捜索", descend: "階段へ", rest: "待機" };
 const HUNGER_JP = { fine: "十分", hungry: "空腹", weak: "衰弱", fainting: "飢餓" };
@@ -205,7 +206,8 @@ const scoreOf = h => h.depth * 100 + h.level * 20 + h.gold;
 let order = null, hiscore = 0;
 try { hiscore = +localStorage.getItem("laya-rogue-hiscore") || 0; } catch {}
 const ITEM = { gold: ["*", "#e2c25c"], food: [":", "#c9a87a"], potion: ["!", "#b184c4"], weapon: [")", "#a9b4bd"], armor: ["]", "#a9b4bd"],
-               scroll: ["?", "#d9d4a8"], missile: [")", "#a9b4bd"], bow: [")", "#a9b4bd"] };
+               scroll: ["?", "#d9d4a8"], missile: [")", "#a9b4bd"], bow: [")", "#a9b4bd"], ring: ["=", "#e8c9ff"], stick: ["/", "#c8e0a0"],
+               amulet: [",", "#ffd54a"] };
 const monsterColor = mo => mo.awake ? "#c85a44" : "#8d8a72";   // 眠っている相手はくすんだ色、襲ってくる相手は赤
 const VIEW_W = 50;                                                // 横 80 マスのうち、勇者を中心にこの幅だけ映す
 let camX = 0;
@@ -237,7 +239,7 @@ ws.onmessage = ev => {
     const gs = genStats.get(m.difficulty) ?? { runs: 0, depth: 0, best: 0, kills: 0 };
     gs.runs++; gs.depth += m.depth; gs.kills += m.kills; gs.best = Math.max(gs.best, m.depth);
     genStats.set(m.difficulty, gs); renderGenStats();
-    $("diedTitle").textContent = m.won ? `B${m.depth}F 到達！` : "LAYA DIED";
+    $("diedTitle").textContent = m.won ? (m.depth === 0 ? "魔除けを持って帰還！" : `B${m.depth}F 到達！`) : "LAYA DIED";
     $("diedSub").textContent = (m.won ? "" : `死因: ${m.cause} / `) + `B${m.depth}F / Lv${m.level} / 撃破 ${m.kills} / 金貨 ${m.gold} / ${m.turn} ターン`;
     $("died").classList.toggle("won", m.won);
     $("died").classList.add("show");
