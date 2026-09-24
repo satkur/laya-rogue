@@ -25,21 +25,45 @@ MAXTRAPS = 10
 DIFFICULTIES = {
     "normal": dict(
         hidden_doors=False,      # 隠し扉と「捜索」(NOTES.md 9〜10 章: 判断が生まれず成績と見た目を損ねるだけだった)
+        hidden_passages=False,   # 通路のマスが岩に見える (passages.c の putpass: rnd(10) + 1 < 階 かつ 1/40)
+        mazes=False,             # 迷路部屋 (rooms.c の do_maze: 暗い部屋の 1/15)
+        xeroc_disguise=False,    # ゼロックが品物に化ける (monsters.c)
         potions_out={"blindness", "hallucination"},   # 850 ターンは長すぎる (判断ボードの回答)。引いたときは何も出ない
         treasure_rooms=True,
         dragon_flame=True,
+        identify="single",       # 識別の巻物は 1 種 (本家の 5 種の出現率を合算)
+        learn_on_use=True,       # 使えば正体が分かる (本家は効果を観測できたときだけ)
+        gear_known=True,         # 落ちている武器・防具の ± が見える (本家は鎧は着ると、武器は識別の巻物で分かる)
+        amulet=False,            # 26 階到達で勝ち (本家は魔除けを拾って 1 階へ帰還)
+        pack_limit=None,         # 持ち物の上限なし (本家は 23 枠)
     ),
     "hard": dict(
         hidden_doors=True,
+        hidden_passages=False,
+        mazes=True,
+        xeroc_disguise=True,
         potions_out=set(),
         treasure_rooms=True,
         dragon_flame=True,
+        identify="single",
+        learn_on_use=True,
+        gear_known=True,
+        amulet=True,
+        pack_limit=None,
     ),
-    "original": dict(
+    "original": dict(            # まごうことなき Rogue 5.4.4
         hidden_doors=True,
+        hidden_passages=True,
+        mazes=True,
+        xeroc_disguise=True,
         potions_out=set(),
         treasure_rooms=True,
         dragon_flame=True,
+        identify="five",
+        learn_on_use=False,
+        gear_known=False,
+        amulet=True,
+        pack_limit=23,
     ),
 }
 
@@ -155,11 +179,17 @@ SCROLL_PROBS = [("monster confusion", 7), ("magic mapping", 4), ("hold monster",
 # 未識別 (簡略版): 使えば正体が分かる。識別の巻物は本家の 5 種 (薬・巻物・武器・鎧・指輪杖) を 1 種にまとめ、出現率は合算 (43)
 SCROLLS_IN_PLAY = {"enchant armor", "enchant weapon", "protect armor", "magic mapping", "teleportation", "identify",
                    "sleep", "create monster", "aggravate monsters", "remove curse",
-                   "monster confusion", "hold monster", "scare monster", "food detection"}
+                   "monster confusion", "hold monster", "scare monster", "food detection",
+                   "identify potion", "identify scroll", "identify weapon", "identify armor", "identify ring, wand or staff"}
+IDENTIFY_SCROLLS = {"identify": ("ring", "stick", "potion", "scroll", "armor", "weapon"),   # 1 種にまとめた版 (NORMAL / HARD): 何でも 1 つ
+                    "identify potion": ("potion",), "identify scroll": ("scroll",), "identify weapon": ("weapon",),
+                    "identify armor": ("armor",), "identify ring, wand or staff": ("ring", "stick")}
 BAD_SCROLLS = {"sleep", "create monster", "aggravate monsters"}
 SCROLL_JP = {"enchant armor": "鎧強化", "enchant weapon": "武器強化", "protect armor": "鎧保護", "magic mapping": "魔法の地図",
              "teleportation": "瞬間移動", "identify": "識別", "sleep": "眠り", "create monster": "怪物召喚", "aggravate monsters": "怪物寄せ",
-             "remove curse": "解呪", "monster confusion": "怪物混乱", "hold monster": "拘束", "scare monster": "恐怖", "food detection": "食料探知"}
+             "remove curse": "解呪", "monster confusion": "怪物混乱", "hold monster": "拘束", "scare monster": "恐怖", "food detection": "食料探知",
+             "identify potion": "識別 (薬)", "identify scroll": "識別 (巻物)", "identify weapon": "識別 (武器)", "identify armor": "識別 (鎧)",
+             "identify ring, wand or staff": "識別 (指輪・杖)"}
 # 戦術の巻物 (NOTES.md 15 章): 怪物混乱 = 読むと手が光り、次に当てた相手が混乱する (4/5 でランダムに動き、そのとき 1/20 で治る)。
 # 拘束 = 周囲 2 マスの起きた敵が止まる (勇者が殴るか怪物寄せで解ける)。恐怖 = 読むのは間違い (笑い声)、床に置いてその上に立つと
 # モンスターがそのマスに入れない (殴ってこない)。一度でも持った恐怖の巻物を拾い直すと塵になる (pack.c)

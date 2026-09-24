@@ -80,7 +80,8 @@ def score(g):
     mw = g.melee_weapon()
     gear = ((10 - g.ac()) + (1 if g.armor.get("protected") else 0) + avg_dice(mw["dice"]) + mw["dplus"] + 0.5 * mw["hplus"])
     rings = sum(1 for r in g.worn if r["name"] in g.known and not g.ring_useless(r) and r["name"] not in ("protection", "add strength"))
-    return (w["depth"] * g.depth + w["level"] * g.level + w["kills"] * g.kills + w["gold"] * g.gold
+    progress = g.max_depth + (g.max_depth - g.depth if g.amulet else 0)  # 魔除けを持って上るぶんも進み (HARD / ORIGINAL)
+    return (w["depth"] * progress + w["level"] * g.level + w["kills"] * g.kills + w["gold"] * g.gold
             + w["hp"] * hp_value(g.hp / max(1, g.max_hp)) + w["heal"] * g.has_heal() + w["food"] * min(g.food, 3)
             + w["fed"] * max(0, min(g.food_left, 1300)) / 1300 + w["gear"] * gear + 1.5 * g.str
             + w["explored"] * g.explored + w["missile"] * min(30, sum(g.missiles.values()))

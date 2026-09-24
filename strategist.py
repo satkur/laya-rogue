@@ -91,7 +91,7 @@ Rules of this game (subset of Rogue 5.4.4):
 - Special attacks: aquator rusts armor (permanent, armor is what keeps the hero alive deeper down); rattlesnake poison lowers strength; wraith drains a level; vampire drains max HP; ice monster freezes; venus flytrap holds (cannot move away, must kill it); leprechaun steals gold; nymph steals a potion; medusa confuses. Sleeping monsters are hit more easily; "mean" ones (hobgoblin, troll, quagga, rattlesnake, orc...) usually wake up when they notice the hero.
 
 Your outputs:
-- plan: "explore_fully" = do not take the stairs while unexplored area remains (more items and experience, but more wandering monsters). "descend_asap" = once the stairs are known, stop exploring and picking up, go down. "free" = no constraint.
+- plan: "explore_fully" = do not take the stairs while unexplored area remains (more items and experience, but more wandering monsters). "descend_asap" = once the stairs are known, stop exploring and picking up, take the stairs (down, or up when the hero carries the Amulet). "free" = no constraint.
 - rest: true = when no awake enemy is in view, only rest (or eat / drink / equip) until HP is at least 90%. Ignored while hungry-weak or worse.
 - tactic (only matters while an awake enemy is in view, and resets to "free" when no awake enemy is in view): "fight" = running away on foot is removed; attacking, the stairs and potions stay. "flee" = attacking and approaching are removed (only useful to reach the stairs or to stall a slow/held situation). "escape" = if the stairs are known, walk to them and go down now, ignoring the monster; if they are not known it behaves like "flee". "free" = no constraint. The stairs are never removed by a tactic.
 - heal_now: true = drink a healing potion on the next turn if the hero carries one.
@@ -126,18 +126,32 @@ def ring_detail(g, r):
     return f"{r['name']}" + (f" {r['value']:+d}" if r["name"] in D.RING_VALUED else "") + (" (cursed)" if g.ring_known_cursed(r) else "")
 
 
+DIFFICULTY_NOTES = {
+    "normal": "Difficulty NORMAL: the goal is to reach dungeon level {goal} alive. Compared with Rogue 5.4.4 there are no hidden doors or passages, no maze rooms, no xeroc mimics, and the potions of blindness and hallucination do not exist. Scrolls of identify are one kind that identifies anything, using an item always reveals its kind, and the bonus of weapons and armor on the floor is visible.",
+    "hard": "Difficulty HARD: the goal is to find the Amulet of Yendor (it lies on level 26 or deeper), then climb back to the surface (\"ascend\" from level 1 wins). Hidden doors, maze rooms and xeroc mimics exist as in Rogue 5.4.4. Scrolls of identify are one kind that identifies anything, using an item always reveals its kind, and the bonus of weapons and armor on the floor is visible.",
+    "original": "Difficulty ORIGINAL: Rogue 5.4.4 as it is. The goal is to find the Amulet of Yendor (it lies on level 26 or deeper), then climb back to the surface (\"ascend\" from level 1 wins). Hidden doors and passages, maze rooms and xeroc mimics exist. The five scrolls of identify each identify one category. Using an item reveals its kind only when the effect could be observed (otherwise it is marked as tried). The bonus of armor is learned by wearing it, that of a weapon only by a scroll of identify weapon. The pack holds 23 slots (\"drop\" discards a useless item).",
+}
+
+
+def system_for(rules):
+    """難易度ごとの説明を付けた SYSTEM (NOTES.md 15 章: Rules と Kinds in play を難易度に合わせる)。"""
+    return SYSTEM + "\n" + DIFFICULTY_NOTES[rules.name].format(goal=D.GOAL_DEPTH)
+
+
 def item_detail(g, it):
     """方針役に見せる品物: 名前と数値、着ている物との比較、距離 (床の上の品のみ)。"""
     k = it["kind"]
     if k == "armor":
         gain = g.gear_gain(it)
-        s = f"{it['name']} (AC {it['ac']}, {'better' if gain > 0 else 'worse'} than worn by {abs(gain)})"
+        s = f"{it['name']} ({'AC ' + str(it['ac']) if it.get('known', True) else 'bonus unknown until worn'}, {'better' if gain > 0 else 'worse'} than worn by {abs(gain)})"
     elif k == "weapon":
         gain = g.gear_gain(it)
-        s = f"{it['name']} ({dice_text(it)}, {'better' if gain > 0 else 'worse'} than worn by {abs(gain):.1f})"
+        s = f"{it['name']} ({dice_text(it) if it.get('known', True) else 'bonus unknown'}, {'better' if gain > 0 else 'worse'} than worn by {abs(gain):.1f})"
     elif k in ("potion", "scroll", "stick", "ring"):
         kind = "wand" if k == "stick" else k
-        s = f"{kind} of {it['name']}" if it["name"] in g.known else f"unidentified {kind}"
+        s = f"{kind} of {it['name']}" if it["name"] in g.known else f"unidentified {kind}" + (" (tried before)" if it["name"] in g.tried else "")
+    elif k == "amulet":
+        s = "the Amulet of Yendor"
     elif k == "gold":
         s = f"gold ({it['value']})"
     elif k == "missile":
@@ -190,6 +204,11 @@ def situation(g, trigger, st):
                  f"{', cursed' if g.weapon.get('cursed_known') else ''}). This level: {g.explored_ratio():.0%} explored.")
     stairs = f"known, {max(abs(g.hx - g.stairs[0]), abs(g.hy - g.stairs[1]))} steps away" if g.seen[g.stairs[1]][g.stairs[0]] else "not found yet"
     lines.append(f"Stairs: {stairs}. Unexplored area on this level: {'yes' if 'explore' in valid else 'no'}.")
+    if g.rules.amulet:
+        lines.append("Amulet of Yendor: " + ("carried - climb back to the surface." if g.amulet else f"not yet found (deepest level so far {g.max_depth}).")
+                     + (f" Pack: {g.pack_count()}/{g.rules.pack_limit} slots." if g.rules.pack_limit else ""))
+    if g.tried:
+        lines.append("Tried but not identified: " + ", ".join(sorted(g.names[k] for k in g.tried)) + ".")
     if g.gear:
         lines.append("Carried but not worn: " + ", ".join(item_detail(g, x) for x in g.gear) + ".")
     lines.append(f"Decision in force: plan={st.plan}, rest={st.rest}, tactic={st.tactic}, fetch={st.fetch}.")
@@ -200,11 +219,11 @@ def situation(g, trigger, st):
     return "\n".join(lines)
 
 
-def ask(text, model=DEFAULT_MODEL, effort="high"):
+def ask(text, model=DEFAULT_MODEL, effort="high", system=SYSTEM):
     """claude -p を 1 回呼ぶ。戻り値は (決定の dict, 秒数, 使用トークン)。失敗したら例外。"""
     if os.environ.get("ANTHROPIC_API_KEY"):
         raise RuntimeError("ANTHROPIC_API_KEY があると従量課金になるので呼ばない")
-    cmd = ["claude", "-p", "--model", model, "--effort", effort, "--output-format", "json", "--system-prompt", SYSTEM,
+    cmd = ["claude", "-p", "--model", model, "--effort", effort, "--output-format", "json", "--system-prompt", system,
            "--tools", "", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence",
            "--json-schema", json.dumps(SCHEMA)]
     t0 = time.perf_counter()
@@ -305,7 +324,7 @@ class Strategist:
         self.calls += 1
         total_calls += 1
         try:
-            d, sec, tokens = self.asker(situation(g, trigger, self), self.model, self.effort)
+            d, sec, tokens = self.asker(situation(g, trigger, self), self.model, self.effort, system_for(g.rules))
         except Exception as e:  # noqa: BLE001  失敗しても Laya は動き続ける
             self.errors += 1
             if self.errors >= 3:  # 制約は外して、しばらく Laya だけで進む
@@ -380,14 +399,16 @@ class Strategist:
             elif self.tactic == "flee":
                 drop |= {"attack", "approach"}
             elif self.tactic == "escape":
+                if "ascend" in valid and g.amulet:
+                    return ["ascend"]
                 if "descend" in valid:
                     return ["descend"]
                 drop |= {"attack", "approach"}
         elif self.rest and g.hp < 0.9 * g.max_hp and g.hunger_word() in ("fine", "hungry"):
             drop |= {"approach", "pick_up", "explore", "descend"}
         if self.plan == "explore_fully" and "explore" in valid:
-            drop.add("descend")
-        elif self.plan == "descend_asap" and "descend" in valid and not awake:
+            drop |= {"descend", "ascend"}
+        elif self.plan == "descend_asap" and ("descend" in valid or "ascend" in valid) and not awake:
             drop |= {"explore", "pick_up"}
         kept = [a for a in valid if a not in drop]
         return kept or valid
