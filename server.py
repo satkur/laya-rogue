@@ -104,7 +104,12 @@ async def ws(sock: WebSocket):
             print(f"ゲーム開始: 種 {g.seed} / 世代 {brain.generation}", flush=True)
             adviser.reset()
             gen = brain.generation
-            depth, log_from = 0, 0
+            depth, log_from = g.depth, 0
+            # 最初の盤面を先に映す (方針役の相談で止まるより前に、勇者が現れた画面にする)
+            await sock.send_json({"type": "floor", "depth": depth})
+            await sock.send_json(frame(g, {"action": None, "probs": {}, "state": "", "ms": 0.0}, log_from))
+            g.newly_seen = []
+            log_from = len(g.log)
             while not g.over and not cfg["restart"]:
                 while cfg["paused"] and not cfg["step"] and not cfg["restart"]:
                     await asyncio.sleep(0.03)

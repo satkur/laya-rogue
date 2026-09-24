@@ -25,6 +25,8 @@ import random
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
+
+import rogue_data as D
 from pathlib import Path
 
 from brain import TAU, coarse_key, describe, hp_word
@@ -74,7 +76,7 @@ def score(g):
             + w["scroll"] * sum(g.scrolls.get(n, 0) for n in TACTICAL_SCROLLS if n in g.known)
             + w["unknown"] * (sum(g.unknown_potions().values()) + sum(g.unknown_scrolls().values()) + len(g.unknown_sticks()))
             + w["wand"] * sum(g.known_sticks().values())
-            + (100 if g.won else 0) - ((w["death"] + w["death_per_floor"] * max(0, 20 - g.depth)) if g.dead else 0))
+            + (100 if g.won else 0) - ((w["death"] + w["death_per_floor"] * max(0, D.GOAL_DEPTH - g.depth)) if g.dead else 0))
 
 
 TEXTS_PER_KEY = 24  # 粗いキー 1 つにつき、Laya の教材として控えておく状況文の数

@@ -28,6 +28,7 @@ import os
 import subprocess
 import time
 
+import rogue_data as D
 from brain import SPECIAL, dist_word, hp_word, threat_word
 
 DEFAULT_MODEL = "claude-sonnet-5"   # 方針役の既定 (2026-09-24 に Sonnet 5 へ。Opus は過剰。claude -p の --model に渡す)
@@ -64,9 +65,9 @@ SCHEMA = {
     "additionalProperties": False,
 }
 
-SYSTEM = """You are the strategist for a hero in a Rogue 5.4-style dungeon crawl. Goal: reach dungeon level 20 alive.
+SYSTEM = f"""You are the strategist for a hero in a Rogue 5.4-style dungeon crawl. Goal: reach dungeon level {D.GOAL_DEPTH} alive.
 A small, fast model ("the pilot", trained by 20,000 games of self-play) picks the hero's action every turn. You do not pick actions. You set constraints that remove options from it, and they stay in force until the next consultation.
-You are consulted at milestones (new level), when HP or hunger worsens, when a non-trivial monster wakes up in view, when a better weapon or armor comes into view, when the hero seems stuck, and periodically while a constraint is in force. Each consultation costs several seconds of real time, nothing in game time.
+You are consulted when HP or hunger worsens, when a non-trivial monster wakes up in view, when a better weapon or armor comes into view, when the hero seems stuck, and periodically while a constraint is in force (not on arrival at a new level). Each consultation costs several seconds of real time, nothing in game time.
 
 Rules of this game (subset of Rogue 5.4.4):
 - Monsters get stronger with depth. The hero gets stronger by experience levels (killing monsters), better weapons/armor found on the floor, strength potions, and scrolls of enchant armor / enchant weapon / protect armor (applied automatically when picked up). There are no rings.
@@ -135,7 +136,7 @@ def situation(g, trigger, st):
     valid = g.valid_actions()
     lines = [
         f"Consulted because: {trigger}.",
-        f"Dungeon level {g.depth} (goal 20). Turn {g.turn}, {g.turn - st.floor_turn} turns on this level.",
+        f"Dungeon level {g.depth} (goal {D.GOAL_DEPTH}). Turn {g.turn}, {g.turn - st.floor_turn} turns on this level.",
         f"Hero: HP {g.hp}/{g.max_hp}, experience level {g.level}, strength {g.str}/{g.max_str}, armor class {g.armor['ac']} ({g.armor['name']}), "
         f"weapon {g.weapon['name']}.",
         f"Hunger: {g.hunger_word()} (about {max(0, g.food_left)} turns of food in stomach). Food rations carried: {g.food}. "
@@ -233,10 +234,9 @@ class Strategist:
             self.tactic = "free"
         hp, hunger = hp_word(g), g.hunger_word()
         trigger = None
-        if g.depth != self.depth:
-            trigger, self.kind = f"arrived at dungeon level {g.depth}", "floor"
+        if g.depth != self.depth:  # 階の移動では相談しない (2026-09-24、244 回中 133 回を占めていたが成績に効かず、画面が止まるだけだった)
             self.depth, self.floor_turn, self.known, self.trail, self.known_gear = g.depth, g.turn, set(), [], set()
-        elif hp != self.hp_band and hp in ("low", "critical"):
+        if hp != self.hp_band and hp in ("low", "critical"):
             trigger, self.kind = f"HP dropped to {hp}", "hp"
         elif hunger != self.hunger and hunger != "fine":
             trigger, self.kind = f"hunger is now {hunger}", "hunger"
