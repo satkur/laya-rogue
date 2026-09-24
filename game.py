@@ -48,7 +48,11 @@ HERO_FIELDS = ("kills", "gold", "level", "exp", "str", "max_str", "hp", "max_hp"
 
 class Game:
     def __init__(self, seed=None, start=None):
-        """start に hero_state() の結果を渡すと、その勇者でその階から始める (学習で深い階を練習するため)。"""
+        """start に hero_state() の結果を渡すと、その勇者でその階から始める (学習で深い階を練習するため)。
+        seed を省略すると乱数で決めて self.seed に残す (デモの地図をあとから sim.py --seeds で再現するため)。"""
+        if seed is None:
+            seed = random.randrange(1_000_000)
+        self.seed = seed
         self.rng = random.Random(seed)
         self.depth = 0
         self.turn = 0
@@ -64,6 +68,7 @@ class Game:
         self.weapon = dict(name=name, dice=parse_dice(dmg), hplus=hplus, dplus=dplus)
         self.armor = dict(name=D.INIT_ARMOR[0], ac=D.INIT_ARMOR[1])
         self.gear = []                          # 拾ったが装備していない武器・防具
+        self.pick_kind = None                   # 方針役の fetch: この種類の品を優先して拾いに行く (None なら良い装備 → 最寄りの順)
         self.bow = True                         # 弓を持っているか (初期装備)。持っていれば矢に弓の威力が乗る
         self.missiles = {"arrow": D.INIT_ARROWS[0] + self.rnd(D.INIT_ARROWS[1])}  # 投げる物: 名前 -> 本数
         self.scrolls = {}                       # 巻物: 名前 -> 枚数
@@ -769,18 +774,43 @@ class Game:
             self.say(f"勇者は{m['jp']}に倒された…")
 
     # ------------------------------------------------------------------ 行動
+    def gear_gain(self, it):
+        """武器・防具 it を装備したときの得 (防具は防御の改善、武器は 1 撃の平均ダメージの改善)。それ以外の品は 0。"""
+        if it["kind"] == "armor":
+            return self.armor["ac"] - it["ac"]
+        if it["kind"] == "weapon":
+            return (avg_dice(it["dice"]) + it["dplus"] + it["hplus"] * 0.5) - (avg_dice(self.weapon["dice"]) + self.weapon["dplus"] + self.weapon["hplus"] * 0.5)
+        return 0
+
     def _better_gear(self):
-        best = None
-        for g in self.gear:
-            if g["kind"] == "armor" and g["ac"] < self.armor["ac"]:
-                gain = self.armor["ac"] - g["ac"]
-            elif g["kind"] == "weapon":
-                gain = (avg_dice(g["dice"]) + g["dplus"] + g["hplus"] * 0.5) - (avg_dice(self.weapon["dice"]) + self.weapon["dplus"] + self.weapon["hplus"] * 0.5)
-            else:
-                continue
-            if gain > 0 and (best is None or gain > best[0]):
-                best = (gain, g)
-        return best[1] if best else None
+        best = max(self.gear, key=self.gear_gain, default=None)
+        return best if best is not None and self.gear_gain(best) > 0 else None
+
+    def visible_upgrades(self):
+        """見えている品のうち、着ている物より良い武器・防具 (近い順)。"""
+        return [i for i in self.visible_items() if self.gear_gain(i) > 0]
+
+    def pick_target(self):
+        """「回収」で向かう品。方針役の fetch があればその種類の最寄り、なければ良い装備、それも無ければ最寄りの品。"""
+        items = self.visible_items()
+        if not items:
+            return None
+        if self.pick_kind:
+            wanted = [i for i in items if i["kind"] == self.pick_kind]
+            if wanted:  # 武器・防具なら、その種類のうち最も得な品 (最寄りが悪い方だと無駄足になる)
+                return max(wanted, key=self.gear_gain) if self.pick_kind in ("armor", "weapon") else wanted[0]
+        ups = [i for i in items if self.gear_gain(i) > 0]
+        return ups[0] if ups else items[0]
+
+    def explored_ratio(self):
+        """この階の岩以外のマスのうち、見たことのある割合。"""
+        total = seen = 0
+        for y in range(H):
+            for x in range(W):
+                if self.tiles[y][x] != ROCK:
+                    total += 1
+                    seen += self.seen[y][x]
+        return seen / max(1, total)
 
     def has_heal(self):
         """正体の分かっている回復薬の数。未識別の物は数えない (飲んでみるまで何か分からない)。"""
@@ -900,7 +930,9 @@ class Game:
             v.append("search")
         if free and self.stairs_known():
             v.append("descend")
-        v.append("rest")
+        # 安全弁 (NOTES 13 章): HP 90% 以上で敵が起きておらず空腹でもなければ待つ理由がない。他に取れる行動があるときだけ外す
+        if not (self.hp >= 0.9 * self.max_hp and not awake and self.hunger_word() == "fine" and any(a in v for a in ("explore", "pick_up", "descend", "search"))):
+            v.append("rest")
         return v
 
     def stairs_known(self):
@@ -1156,9 +1188,9 @@ class Game:
             self.food_left = min(D.STOMACH_SIZE, max(0, self.food_left) + D.HUNGER_TIME - 200 + self.rnd(400))
             self.say("食事をした")
         elif action == "pick_up":
-            items = self.visible_items()
-            if items:
-                self._move_to(self._step_toward((items[0]["x"], items[0]["y"])))
+            it = self.pick_target()
+            if it:
+                self._move_to(self._step_toward((it["x"], it["y"])))
         elif action == "equip":
             g = self._better_gear()
             if g:

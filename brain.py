@@ -36,7 +36,7 @@ ACTION_DESC = {
     "zap_away": "Zap the wand of teleport away at the enemy in line: it is sent somewhere else on this level.",
     "zap_unknown": "Zap an unidentified wand at the enemy in line; you learn what it was.",
     "eat": "Eat food.",
-    "pick_up": "Walk to the nearest item.",
+    "pick_up": "Walk to the item (a better weapon or armor first, otherwise the nearest one).",
     "equip": "Put on the better weapon or armor you carry.",
     "explore": "Walk toward unexplored area.",
     "search": "Search the dead ends and walls for a hidden door.",
@@ -99,8 +99,19 @@ def special_word(m):
     return SPECIAL.get(m["ch"], "plain")
 
 
+ITEM_WORD = {"stick": "wand", "missile": "missiles"}
+
+
+def item_word(g, it):
+    """状況文の品物: 種類と距離。武器・防具は着ている物より良いか悪いかを添える (拾う価値を状況で区別できるように)。"""
+    kind = ITEM_WORD.get(it["kind"], it["kind"])
+    if it["kind"] in ("weapon", "armor"):
+        kind = ("better " if g.gear_gain(it) > 0 else "worse ") + kind
+    return f"{kind} {dist_word(g.dist(it['x'], it['y']))}"
+
+
 def describe(g, valid):
-    """状況文。数値を避けて語彙を絞ってある。"""
+    """状況文。数値を避けて語彙を絞ってある。品物は近い順に 3 つまで。"""
     mons = g.visible_monsters()
     items = g.visible_items()
     parts = [f"Depth: {depth_word(g.depth)}.", f"Experience for this depth: {pace_word(g)}.", f"HP {hp_word(g)}.", f"Hunger: {g.hunger_word()}.",
@@ -118,7 +129,7 @@ def describe(g, valid):
         parts.append(f"Enemies: {seen}" + (f" and {len(mons) - 3} more." if len(mons) > 3 else "."))
     else:
         parts.append("Enemies: none.")
-    parts.append(f"Items: {items[0]['kind']} {dist_word(g.dist(items[0]['x'], items[0]['y']))}." if items else "Items: none.")
+    parts.append(f"Items: {', '.join(item_word(g, i) for i in items[:3])}." if items else "Items: none.")
     parts.append("Stairs: " + ("known." if "descend" in valid else "not found."))
     parts.append("Unexplored area: " + ("yes." if "explore" in valid else "no."))
     return " ".join(parts)
@@ -144,7 +155,7 @@ def coarse_key(g, valid):
     else:
         enemy = "none"
     hunger = g.hunger_word()
-    flags = "".join(c for c, on in (("H", g.held_by is not None), ("C", g.confused)) if on)
+    flags = "".join(c for c, on in (("H", g.held_by is not None), ("C", g.confused), ("G", bool(g.visible_upgrades()))) if on)  # G: 良い装備が見えている
     return "|".join([hp_word(g), "starving" if hunger in ("weak", "fainting") else hunger, enemy, flags, pace_word(g), ",".join(valid)])
 
 

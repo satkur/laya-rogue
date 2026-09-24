@@ -51,9 +51,16 @@ POOL_PER_DEPTH = 300
 # 点にしない (持つことに点を付けると読むと損になり、1 回目の学習で地図を読む率が 1〜2% になった)
 # 未識別の薬・巻物は 1 つ 0.5 (拾う価値はあるが、正体の分かった回復薬 2.5 より低い。試して当たれば得、外れれば損は効果そのものから)
 # 死の減点は残りの階数に比例して増やす (浅い階で死ぬほど失うものが大きい)。50 固定だと「1 階のために 15% の死亡リスクを取る」のが最適になっていた
-WANTS = dict(depth=10, level=5, kills=0.5, gold=0.01, hp=5, heal=2.5, food=3, fed=6, gear=1.5, explored=0.006, death=50, death_per_floor=5,
+WANTS = dict(depth=10, level=5, kills=0.5, gold=0.01, hp=5, heal=2.5, food=3, fed=6, gear=1.5, explored=0.02, death=50, death_per_floor=5,
              missile=0.1, scroll=0.5, unknown=0.5, wand=0.5)   # wand: 正体の分かった杖の残り 1 回ぶん。未識別の杖は 1 本 unknown
 TACTICAL_SCROLLS = ("teleportation",)
+
+
+def hp_value(f):
+    """HP の割合 f (0〜1) の価値。凹型: 低いほど 1 点の HP が重く、満タン近くではほぼ 0。
+    割合そのままだと「80% から満タンまで休む」だけで +1 点になり、探索 (40 マスで +0.24) より得に見えて、
+    Laya が HP 80〜99% で待機ばかりする癖になった (NOTES 13 章)。"""
+    return 1 - (1 - f) ** 2
 
 
 def score(g):
@@ -61,7 +68,7 @@ def score(g):
     gear = ((10 - g.armor["ac"]) + (1 if g.armor.get("protected") else 0) + avg_dice(g.weapon["dice"])
             + g.weapon["dplus"] + 0.5 * g.weapon["hplus"])
     return (w["depth"] * g.depth + w["level"] * g.level + w["kills"] * g.kills + w["gold"] * g.gold
-            + w["hp"] * g.hp / max(1, g.max_hp) + w["heal"] * g.has_heal() + w["food"] * min(g.food, 3)
+            + w["hp"] * hp_value(g.hp / max(1, g.max_hp)) + w["heal"] * g.has_heal() + w["food"] * min(g.food, 3)
             + w["fed"] * max(0, min(g.food_left, 1300)) / 1300 + w["gear"] * gear + 1.5 * g.str
             + w["explored"] * g.explored + w["missile"] * min(30, sum(g.missiles.values()))
             + w["scroll"] * sum(g.scrolls.get(n, 0) for n in TACTICAL_SCROLLS if n in g.known)

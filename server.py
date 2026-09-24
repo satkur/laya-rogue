@@ -4,6 +4,7 @@
     uv run server.py --no-open
     uv run server.py --llm      # 方針役の LLM (strategist.py、claude -p を呼ぶ) を入れた状態で始める。画面の L キーでも切り替えられる
     uv run server.py --llm-model sonnet
+    uv run server.py --gen gen22    # 世代を指定 (既定は DEFAULT_GENERATION = 測定済みの最良)
 """
 import asyncio
 import sys
@@ -24,6 +25,8 @@ HOST, PORT = "127.0.0.1", 8766
 STATIC = Path(__file__).parent / "static"
 brain = None
 LLM_MODEL = sys.argv[sys.argv.index("--llm-model") + 1] if "--llm-model" in sys.argv else DEFAULT_MODEL
+DEFAULT_GENERATION = "gen21"  # 既定は「測定済みの最良」を固定 (weights/ の最新番号は未測定のことがある。gen22 は待機が多い、NOTES 13 章)
+GENERATION = sys.argv[sys.argv.index("--gen") + 1] if "--gen" in sys.argv else DEFAULT_GENERATION
 adviser = Strategist(model=LLM_MODEL, enabled="--llm" in sys.argv)  # いまは付けると成績が下がるので既定は切 (NOTES.md 6 章)
 strategist_mod.MAX_CALLS_TOTAL = 300  # 画面を開きっぱなしにしても、ここで方針役は自動で止まる (画面で入れ直すと再開)
 
@@ -39,7 +42,7 @@ async def lifespan(app: FastAPI):
     global brain
     print("Laya を読み込み中...", flush=True)
     gens = generations()
-    brain = LayaBrain(gens[-1] if gens else None)
+    brain = LayaBrain(GENERATION if GENERATION in gens else (gens[-1] if gens else None))
     g = Game(0)
     for _ in range(5):  # 初回の CUDA カーネル準備を済ませておく
         g.step(brain.decide(g)["action"])
@@ -60,7 +63,7 @@ async def index():
 
 def adviser_state():
     return {"enabled": adviser.enabled, "model": adviser.model, "stopped": adviser.stopped, "calls": adviser.calls,
-            "plan": adviser.plan, "rest": adviser.rest, "tactic": adviser.tactic}
+            "plan": adviser.plan, "rest": adviser.rest, "tactic": adviser.tactic, "fetch": adviser.fetch}
 
 
 def frame(g, d, log_from):
@@ -97,6 +100,8 @@ async def ws(sock: WebSocket):
     async def play():
         while True:
             g = Game()
+            g.say(f"地図の種 {g.seed}")  # sim.py --seeds {種} で同じ地図を再現できる
+            print(f"ゲーム開始: 種 {g.seed} / 世代 {brain.generation}", flush=True)
             adviser.reset()
             gen = brain.generation
             depth, log_from = 0, 0

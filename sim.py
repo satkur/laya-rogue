@@ -102,11 +102,15 @@ def standard_hero(depth):
     return st
 
 
+STALL_TURNS = 300  # この連続ターン数、階段未発見・探索の縁なし・起きた敵なしが続いたら「行き詰まり」として記録する
+
+
 def play(brain, seed, max_turns, start=None):
     g = Game(seed, standard_hero(start) if start else None)
     if hasattr(brain, "rng"):  # 行動を引く乱数もゲームごとにシードで決める。共有したままだと同じ重みでも並べる順で結果が変わる
         brain.rng = random.Random(seed)
     ms, miss, n = [], 0, 0
+    stalls, stuck, stuck_depth = [], 0, 0  # 行き詰まり: 階段が見つからないのに探索の縁が尽き、敵もいない状態が続く (NOTES 13 章)
     while not g.over and g.turn < max_turns:
         d = brain.decide(g)
         n += 1
@@ -115,8 +119,16 @@ def play(brain, seed, max_turns, start=None):
             ms.append(d["ms"])
         g.step(d["action"])
         g.log.clear()
+        if g.depth != stuck_depth:
+            stuck, stuck_depth = 0, g.depth
+        if not g.over and not g.stairs_known() and not g._explore and not any(m["awake"] for m in g.visible_monsters()):
+            stuck += 1
+            if stuck == STALL_TURNS:
+                stalls.append([g.depth, g.turn])
+        else:
+            stuck = 0
     end = "到達" if g.won else g.cause if g.dead else "時間切れ"
-    return dict(depth=g.depth, level=g.level, kills=g.kills, gold=g.gold, turn=g.turn, end=end, ms=ms, miss=miss / max(1, n))
+    return dict(depth=g.depth, level=g.level, kills=g.kills, gold=g.gold, turn=g.turn, end=end, ms=ms, miss=miss / max(1, n), stalls=stalls)
 
 
 def _cpu_job(args):
@@ -188,6 +200,9 @@ def main():
         if start:
             full += f"@B{start}"
         report(full, results, time.perf_counter() - t0)
+        stalled = [(s, r["stalls"]) for s, r in zip(seeds, results) if r.get("stalls")]
+        if stalled:
+            print(f"    行き詰まり {len(stalled)} 回: " + " ".join(f"種{s}@B{st[0][0]}F(t{st[0][1]})" for s, st in stalled[:12]) + (" ..." if len(stalled) > 12 else ""), flush=True)
         (DATA / f"results_{full.replace(':', '-').replace('@', '_')}.json").write_text(
             json.dumps({str(s): {k: v for k, v in r.items() if k != "ms"} for s, r in zip(seeds, results)}, ensure_ascii=False, indent=1), encoding="utf-8")
 
