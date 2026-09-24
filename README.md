@@ -2,7 +2,7 @@
 
 [Laya](https://github.com/NandhaKishorM/laya) にローグライクをプレイさせる個人の実験。メモは [NOTES.md](NOTES.md)。
 
-![一手一手は Laya、方針は claude -p。10 階でアクエイターから鎧を守って逃げ、11 階へ降りる 10 秒](docs/demo.gif)
+![一手一手は Laya、方針は claude -p。1 階を探索し、敵を 3 体倒してレベルを上げ、階段を降りて 2 階に着くまでの 13 秒](docs/demo.gif)
 
 きっかけは laya-mlx の [Snake デモ](https://mizchi-laya-web-demo.static.hf.space/snake.html)。ローカルで秒間 60 回判断できる小さな AI なら、何かゲームに使えるかもしれないと思った。
 
