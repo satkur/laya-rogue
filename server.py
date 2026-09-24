@@ -75,11 +75,12 @@ def frame(g, d, log_from):
         "type": "frame",
         "turn": g.turn,
         "hero": {"x": g.hx, "y": g.hy, "hp": g.hp, "max_hp": g.max_hp, "level": g.level, "str": g.str, "max_str": g.max_str,
-                 "ac": g.armor["ac"], "weapon": g.weapon["name"], "armor": g.armor["name"], "food": g.food,
+                 "ac": g.ac(), "weapon": g.weapon["name"], "armor": g.armor["name"], "food": g.food,
                  "hunger": g.hunger_word(), "heal": g.has_heal(), "gold": g.gold, "kills": g.kills, "depth": g.depth,
                  "missiles": sum(g.missiles.values()), "scrolls": sum(c for k, c in g.scrolls.items() if k in g.known), "bow": g.bow,
                  "unknown_potions": sum(g.unknown_potions().values()), "unknown_scrolls": sum(g.unknown_scrolls().values()),
                  "wands": sum(g.known_sticks().values()), "unknown_wands": len(g.unknown_sticks()),
+                 "rings": [g.ring_label(r) for r in g.worn], "ring_bag": len(g.rings),
                  "status": [w for w, on in (("混乱", g.confused), ("拘束", g.held_by is not None), ("足止め", g.no_move), ("行動不能", g.no_command)) if on]},
         "monsters": [{"id": m["id"], "ch": m["ch"], "x": m["x"], "y": m["y"], "hp": m["hp"], "max_hp": m["max_hp"], "awake": m["awake"]}
                      for m in g.visible_monsters()],

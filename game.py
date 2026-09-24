@@ -31,7 +31,8 @@ VS_POISON, VS_MAGIC = 0, 3
 LAMP_DIST = 3
 
 ACTIONS = ["attack", "throw", "approach", "flee", "quaff_heal", "quaff_str", "read_map", "read_teleport",
-           "quaff_unknown", "read_unknown", "read_identify", "zap_attack", "zap_slow", "zap_away", "zap_unknown",
+           "quaff_unknown", "read_unknown", "read_identify", "read_remove_curse", "put_on_ring", "remove_ring",
+           "zap_attack", "zap_slow", "zap_away", "zap_unknown",
            "eat", "pick_up", "equip", "explore", "search", "descend", "rest"]
 
 
@@ -44,7 +45,7 @@ def avg_dice(dice):
 
 
 HERO_FIELDS = ("kills", "gold", "level", "exp", "str", "max_str", "hp", "max_hp", "food_left", "food", "potions",
-               "weapon", "armor", "gear", "no_food", "missiles", "scrolls", "bow", "known", "sticks")
+               "weapon", "armor", "gear", "no_food", "missiles", "scrolls", "bow", "known", "sticks", "rings", "worn")
 
 
 class Game:
@@ -76,6 +77,8 @@ class Game:
         self.missiles = {"arrow": D.INIT_ARROWS[0] + self.rnd(D.INIT_ARROWS[1])}  # 投げる物: 名前 -> 本数
         self.scrolls = {}                       # 巻物: 名前 -> 枚数
         self.sticks = {}                        # 杖: 種類 -> 残り回数 (同じ種類は合算)
+        self.rings = []                         # 持っている指輪 (着けていない): {name, value, cursed}
+        self.worn = []                          # 着けている指輪 (最大 2)。呪われていると外せない
         self.known = set()                      # 正体の分かった薬・巻物・杖の種類 (未識別の仕組み。使えば分かる)
         self.names = self._item_names(seed)     # 未識別のあいだの見た目 (薬の色、巻物の題名)。表示にだけ使う
         self.no_command = 0                     # 凍結・気絶で動けない残りターン
@@ -110,6 +113,7 @@ class Game:
         for kind in sorted(D.SCROLLS_IN_PLAY):
             names[kind] = " ".join(r.choice(D.SCROLL_SYLLABLES) for _ in range(r.randrange(2, 4)))
         names.update(zip(sorted(D.STICKS_IN_PLAY), r.sample(D.STICK_MATERIALS, len(D.STICKS_IN_PLAY))))
+        names.update(zip(sorted(D.RING_KINDS), r.sample(D.RING_STONES, len(D.RING_KINDS))))
         return names
 
     def label(self, kind):
@@ -118,7 +122,15 @@ class Game:
             return f"{D.POTION_JP[kind]}の薬" if kind in self.known else f"{self.names[kind]}色の薬"
         if kind in D.STICKS_IN_PLAY:
             return f"{D.STICK_JP[kind]}の杖" if kind in self.known else f"{self.names[kind]}の杖"
+        if kind in D.RING_KINDS:
+            return f"{D.RING_JP[kind]}の指輪" if kind in self.known else f"{self.names[kind]}の指輪"
         return f"{D.SCROLL_JP[kind]}の巻物" if kind in self.known else f"「{self.names[kind]}」の巻物"
+
+    def ring_label(self, r):
+        s = self.label(r["name"])
+        if r["name"] in self.known and r["name"] in D.RING_VALUED:
+            s += f" {r['value']:+d}"
+        return s
 
     # ------------------------------------------------------------------ 乱数 (本家と同じ語彙)
     def rnd(self, n):
@@ -153,6 +165,7 @@ class Game:
         c.potions = dict(self.potions)
         c.known = set(self.known)
         c.sticks = dict(self.sticks)
+        c.rings, c.worn = [dict(r) for r in self.rings], [dict(r) for r in self.worn]
         c.missiles, c.scrolls = dict(self.missiles), dict(self.scrolls)
         c.weapon, c.armor = dict(self.weapon), dict(self.armor)
         c.gear = [dict(x) for x in self.gear]
@@ -346,6 +359,8 @@ class Game:
         mod = hp // 8 if lvl == 1 else hp // 6
         mod *= 20 if lvl > 9 else 4 if lvl > 6 else 1
         self._next_id += 1
+        if self.wearing("aggravate monster"):  # 怪物寄せの指輪: 新しいモンスターも最初から追ってくる (monsters.c の new_monster)
+            awake = True
         self.monsters.append(dict(id=self._next_id, ch=ch, kind=name, jp=jp, x=x, y=y, hp=hp, max_hp=hp, lvl=lvl, arm=arm,
                                   dice=parse_dice(dmg), exp=exp + add * 10 + mod, flags=flags, carry=carry,
                                   awake=awake, gazed=False))
@@ -388,6 +403,14 @@ class Game:
         if kind == "stick":
             name = self._pick(D.STICK_PROBS)[0]
             return dict(kind="stick", name=name, charges=self.rnd(D.STICK_CHARGES[0]) + D.STICK_CHARGES[1]) if name in D.STICKS_IN_PLAY else None
+        if kind == "ring":
+            name = self._pick(D.RING_PROBS)[0]
+            value, cursed = 0, name in D.RING_CURSED
+            if name in D.RING_VALUED:
+                value = self.rnd(3)
+                if value == 0:
+                    value, cursed = -1, True
+            return dict(kind="ring", name=name, value=value, cursed=cursed)
         return None
 
     # ------------------------------------------------------------------ 視界: 明るい部屋は全体、それ以外は隣のマスだけ
@@ -577,7 +600,11 @@ class Game:
                 self._search_path.pop(0)
             return
         self.searched[here] = self.searched.get(here, 0) + 1
-        for nx, ny in self._nb8[here]:
+        self._search_here()
+
+    def _search_here(self):
+        """周囲 8 マスの隠し扉と罠を、それぞれ 1/5 で見つける (command.c の search)。"""
+        for nx, ny in self._nb8[(self.hx, self.hy)]:
             if self.tiles[ny][nx] == SDOOR and self.rnd(5) == 0:
                 self._reveal(nx, ny)
             t = self._trap_at(nx, ny)
@@ -616,21 +643,21 @@ class Game:
         return self.rnd(20) + hplus >= (20 - att_lvl) - def_arm
 
     def hero_damage_per_turn(self, m):
-        hplus = self.weapon["hplus"] + D.STR_PLUS[self.str] + (0 if m["awake"] else 4)
-        per_hit = avg_dice(self.weapon["dice"]) + self.weapon["dplus"] + D.ADD_DAM[self.str]
+        hplus = self.weapon["hplus"] + D.STR_PLUS[self.str] + self.ring_bonus("dexterity") + (0 if m["awake"] else 4)
+        per_hit = avg_dice(self.weapon["dice"]) + self.weapon["dplus"] + D.ADD_DAM[self.str] + self.ring_bonus("increase damage")
         return self.hit_chance(self.level, m["arm"], hplus) * max(0.0, per_hit)
 
     def monster_damage_per_turn(self, m):
         dice = [(self.vf_hit or 1, 1)] if m["ch"] == "F" else m["dice"]
-        return sum(self.hit_chance(m["lvl"], self.armor["ac"], 0) * n * (s + 1) / 2 for n, s in dice)
+        return sum(self.hit_chance(m["lvl"], self.ac(), 0) * n * (s + 1) / 2 for n, s in dice)
 
     def _hero_attacks(self, m):
-        hplus = self.weapon["hplus"] + D.STR_PLUS[self.str] + (0 if m["awake"] else 4)
+        hplus = self.weapon["hplus"] + D.STR_PLUS[self.str] + self.ring_bonus("dexterity") + (0 if m["awake"] else 4)
         m["awake"] = True
         hit = False
         for n, s in self.weapon["dice"]:
             if self._swing(self.level, m["arm"], hplus):
-                m["hp"] -= max(0, self.roll(n, s) + self.weapon["dplus"] + D.ADD_DAM[self.str])
+                m["hp"] -= max(0, self.roll(n, s) + self.weapon["dplus"] + D.ADD_DAM[self.str] + self.ring_bonus("increase damage"))
                 hit = True
         if m["hp"] > 0:
             self.say(f"{m['jp']}に攻撃が{'当たった' if hit else '外れた'}")
@@ -666,6 +693,8 @@ class Game:
         self.level = new
 
     def _rust(self):
+        if self.wearing("maintain armor"):
+            return
         if self.armor["name"] != "leather armor" and self.armor["ac"] < 9 and not self.armor.get("protected"):
             self.armor["ac"] += 1
             self.say("鎧が錆びて弱くなった")
@@ -696,7 +725,7 @@ class Game:
             self.no_command += self.spread(D.SLEEPTIME)
             self.say("白い霧に包まれて眠ってしまった")
         elif k == "arrow trap":
-            if self._swing(self.level - 1, self.armor["ac"], 1):  # 本家は勇者のレベル (階ではない)
+            if self._swing(self.level - 1, self.ac(), 1):  # 本家は勇者のレベル (階ではない)
                 self.hp -= self.roll(1, 6)
                 self.say("矢が飛んできて刺さった")
             else:
@@ -706,9 +735,9 @@ class Game:
             self.say("転移の罠を踏んだ")
             self._teleport()
         elif k == "dart trap":
-            if self._swing(self.level + 1, self.armor["ac"], 1):
+            if self._swing(self.level + 1, self.ac(), 1):
                 self.hp -= self.roll(1, 4)
-                if not self.save(VS_POISON) and self.str > 3:
+                if not self.save(VS_POISON) and self.str > 3 and not self.wearing("sustain strength"):
                     self.str -= 1
                     self.say("毒ダーツが刺さり、力が抜けた")
                 else:
@@ -727,7 +756,7 @@ class Game:
         dice = [(self.vf_hit or 0, 1)] if m["ch"] == "F" else m["dice"]
         hit, before = False, self.hp
         for n, s in dice:
-            if self._swing(m["lvl"], self.armor["ac"], 0):
+            if self._swing(m["lvl"], self.ac(), 0):
                 self.hp -= max(0, self.roll(n, s))
                 hit = True
         if not hit:
@@ -742,7 +771,7 @@ class Game:
             self.no_command += self.rnd(2) + 2
             self.say("凍りついて動けない")
         elif ch == "R":
-            if not self.save(VS_POISON) and self.str > 3:
+            if not self.save(VS_POISON) and self.str > 3 and not self.wearing("sustain strength"):
                 self.str -= 1
                 self.say("毒で力が抜けた")
         elif ch in "WV":
@@ -831,9 +860,108 @@ class Game:
 
     def has_str_potion(self):
         n = self.potions.get("gain strength", 0) if "gain strength" in self.known else 0
-        if "restore strength" in self.known and self.str < self.max_str:
+        if "restore strength" in self.known and self.base_str() < self.max_str:
             n += self.potions.get("restore strength", 0)
         return n
+
+    # ------------------------------------------------------------------ 指輪 (rings.c)
+    def wearing(self, kind):
+        return sum(1 for r in self.worn if r["name"] == kind)
+
+    def ring_bonus(self, kind):
+        return sum(r["value"] for r in self.worn if r["name"] == kind)
+
+    def ac(self):
+        """実効の防御 (防御の指輪込み。fight.c)。小さいほど硬い。"""
+        return self.armor["ac"] - self.ring_bonus("protection")
+
+    def base_str(self):
+        """力の指輪を差し引いた腕力。max_str と比べるときはこちら (misc.c の chg_str)。"""
+        return self.str - self.ring_bonus("add strength")
+
+    def _chg_str(self, amt):
+        self.str = max(3, min(31, self.str + amt))
+        self.max_str = max(self.max_str, self.base_str())
+
+    def _ring_eat(self):
+        """指輪ぶんの空腹の増加 (rings.c の ring_eat)。"""
+        eat = 0
+        for r in self.worn:
+            u = D.RING_EAT[r["name"]]
+            if u < 0:
+                u = 1 if self.rnd(-u) == 0 else 0
+            if r["name"] == "slow digestion":
+                u = -u
+            eat += u
+        return eat
+
+    def ring_useless(self, r):
+        """正体が分かっていて着ける価値がない (飾り、常に呪いの種類、マイナスの値)。"""
+        k = r["name"]
+        return k in self.known and (k == "adornment" or k in D.RING_CURSED or (k in D.RING_VALUED and r["value"] < 0))
+
+    def ring_known_cursed(self, r):
+        return bool(r.get("cursed_known")) or (r["name"] in self.known and (r["name"] in D.RING_CURSED or r["value"] < 0))
+
+    def unknown_rings(self):
+        out = {}
+        for r in self.worn + self.rings:
+            if r["name"] not in self.known:
+                out[r["name"]] = out.get(r["name"], 0) + 1
+        return out
+
+    def _ring_to_wear(self):
+        """着けるならどれか: 正体の分かった有益な指輪 (RING_WORTH の順) → 未識別 (見た目の順)。着けるかどうかは Laya。"""
+        cands = [r for r in self.rings if not self.ring_useless(r)]
+        known = [r for r in cands if r["name"] in self.known]
+        if known:
+            return max(known, key=lambda r: (D.RING_WORTH.get(r["name"], 0), r["value"]))
+        return min(cands, key=lambda r: self.names[r["name"]]) if cands else None
+
+    def _ring_to_remove(self):
+        """外すならどれか: 分かっている不要な物 → 未識別 → 空腹の進む物。呪いが分かっている物は候補にしない。"""
+        cands = [r for r in self.worn if not self.ring_known_cursed(r)]
+        if not cands:
+            return None
+        for group in ([r for r in cands if self.ring_useless(r)], [r for r in cands if r["name"] not in self.known]):
+            if group:
+                return group[0]
+        return max(cands, key=lambda r: D.RING_EAT[r["name"]])
+
+    def cursed_worn(self):
+        """外せないと分かっている装備 (解呪の巻物の対象)。"""
+        return [r for r in self.worn if self.ring_known_cursed(r)]
+
+    def _put_on(self, r):
+        self.rings.remove(r)
+        self.worn.append(r)
+        self.say(f"{self.ring_label(r)}を着けた")
+        if r["name"] == "add strength":
+            self._chg_str(r["value"])
+        elif r["name"] == "aggravate monster":
+            for m in self.monsters:
+                m["awake"] = True
+            self.say("怪物たちが目を覚ました気配がする")
+
+    def _remove(self, r):
+        if r["cursed"]:
+            r["cursed_known"] = True
+            self.say(f"{self.ring_label(r)}は外せない (呪われている)")
+            return
+        self.worn.remove(r)
+        self.rings.append(r)
+        if r["name"] == "add strength":
+            self._chg_str(-r["value"])
+        self.say(f"{self.ring_label(r)}を外した")
+
+    def _ring_turn(self):
+        """毎ターンの指輪の効き (command.c の末尾): 探索の指輪は自動で捜索、瞬間移動の指輪は 1/50 で飛ばされる。"""
+        for r in list(self.worn):
+            if r["name"] == "searching":
+                self._search_here()
+            elif r["name"] == "teleportation" and self.rnd(50) == 0:
+                self.say("指輪の力でどこかへ飛ばされた")
+                self._teleport()
 
     # ------------------------------------------------------------------ 未識別 (簡略版)
     def unknown_potions(self):
@@ -860,6 +988,8 @@ class Game:
         before = self.label(kind)
         self.known.add(kind)
         self.say(f"{before}は{self.label(kind)}だった")
+        if kind in D.RING_KINDS:
+            return
         bag = self.potions if kind in D.POTIONS_IN_PLAY else self.sticks if kind in D.STICKS_IN_PLAY else self.scrolls
         if kind in (D.BAD_POTIONS | D.BAD_SCROLLS) and bag.get(kind, 0) > 0:
             self.say(f"残りの{self.label(kind)}を捨てた")
@@ -881,15 +1011,18 @@ class Game:
                 self.confused = 0
             self.say("体力が回復した")
         elif kind == "restore strength":
-            self.str = self.max_str
+            if self.base_str() < self.max_str:
+                self.str = self.max_str + self.ring_bonus("add strength")
             self.say("力が戻った")
         elif kind == "gain strength":
-            self.str = min(31, self.str + 1)
-            self.max_str = max(self.max_str, self.str)
+            self._chg_str(1)
             self.say("力が強くなった")
         elif kind == "poison":
-            self.str = max(3, self.str - (self.rnd(3) + 1))  # chg_str(-(rnd(3) + 1))。最大値は下がらないので力の回復で戻る
-            self.say("気分が悪くなった (毒)")
+            if self.wearing("sustain strength"):
+                self.say("一瞬気分が悪くなった (毒)")
+            else:
+                self.str = max(3, self.str - (self.rnd(3) + 1))  # chg_str(-(rnd(3) + 1))。最大値は下がらないので力の回復で戻る
+                self.say("気分が悪くなった (毒)")
         elif kind == "confusion":
             self.confused += self.rnd(8) + D.HUHDURATION
             self.say("目が回る (混乱)")
@@ -923,8 +1056,15 @@ class Game:
             v.append("quaff_unknown")
         if self.unknown_scrolls():
             v.append("read_unknown")
-        if self.scrolls.get("identify") and "identify" in self.known and (self.unknown_potions() or self.unknown_scrolls() or self.unknown_sticks()):
+        if self.scrolls.get("identify") and "identify" in self.known and (self.unknown_potions() or self.unknown_scrolls() or self.unknown_sticks()
+                                                                           or self.unknown_rings()):
             v.append("read_identify")
+        if self.scrolls.get("remove curse") and "remove curse" in self.known and self.cursed_worn():
+            v.append("read_remove_curse")
+        if len(self.worn) < 2 and self._ring_to_wear():
+            v.append("put_on_ring")
+        if self._ring_to_remove():
+            v.append("remove_ring")
         if self.sticks and self._zap_target():
             for kind, act in (("attack", "zap_attack"), ("slow monster", "zap_slow"), ("teleport away", "zap_away")):
                 if self.sticks.get(kind) and kind in self.known:
@@ -1088,11 +1228,20 @@ class Game:
             self.say("別の場所に飛ばされた")
         elif name == "identify":
             self._learn("identify")
-            unknown = {**self.unknown_potions(), **self.unknown_scrolls(), **self.unknown_sticks()}
-            if unknown:
+            worn_unknown = [r for r in self.worn if r["name"] not in self.known]
+            unknown = {**self.unknown_potions(), **self.unknown_scrolls(), **self.unknown_sticks(), **self.unknown_rings()}
+            if worn_unknown:  # 着けている未識別の指輪を先に (外せるかどうかに関わる)
+                self._learn(worn_unknown[0]["name"])
+            elif unknown:
                 self._learn(self._unknown_pick(unknown))
             else:
                 self.say("識別の巻物だったが、調べる物がなかった")
+        elif name == "remove curse":
+            for r in self.worn:
+                r["cursed"], r["cursed_known"] = False, False
+            self.armor.pop("cursed", None)
+            self.weapon.pop("cursed", None)
+            self.say("誰かに見守られている気がした (解呪)")
         elif name == "sleep":
             self.no_command += self.rnd(self.spread(D.SLEEPTIME)) + 4  # rnd(SLEEPTIME) + 4
             self.say("眠気に襲われた (眠り)")
@@ -1148,6 +1297,7 @@ class Game:
             self._doctor()
             self._stomach()
             self._wanderer()
+            self._ring_turn()
 
     def _act(self, action):
         mons = self.visible_monsters()
@@ -1172,7 +1322,7 @@ class Game:
             self.say(f"{self.label(kind)}を飲んだ")
             self._quaff(kind)
         elif action == "quaff_str" and self.has_str_potion():
-            restore = "restore strength" in self.known and self.potions.get("restore strength", 0) and self.str < self.max_str
+            restore = "restore strength" in self.known and self.potions.get("restore strength", 0) and self.base_str() < self.max_str
             kind = "restore strength" if restore else "gain strength"
             self.say(f"{self.label(kind)}を飲んだ")
             self._quaff(kind)
@@ -1186,6 +1336,16 @@ class Game:
             self._read(kind)
         elif action == "read_identify" and self.scrolls.get("identify") and "identify" in self.known:
             self._read("identify")
+        elif action == "read_remove_curse" and self.scrolls.get("remove curse") and "remove curse" in self.known:
+            self._read("remove curse")
+        elif action == "put_on_ring" and len(self.worn) < 2:
+            r = self._ring_to_wear()
+            if r:
+                self._put_on(r)
+        elif action == "remove_ring":
+            r = self._ring_to_remove()
+            if r:
+                self._remove(r)
         elif action in ("zap_attack", "zap_slow", "zap_away", "zap_unknown"):
             target = self._zap_target()
             if target:
@@ -1252,6 +1412,9 @@ class Game:
             elif it["kind"] == "stick":
                 self.sticks[it["name"]] = self.sticks.get(it["name"], 0) + it["charges"]
                 self.say(f"{self.label(it['name'])}を拾った")
+            elif it["kind"] == "ring":
+                self.rings.append(dict(name=it["name"], value=it["value"], cursed=it["cursed"]))
+                self.say(f"{self.label(it['name'])}を拾った")
             elif it["kind"] == "missile":
                 self.missiles[it["name"]] = self.missiles.get(it["name"], 0) + it["count"]
                 self.say(f"{it['name']} を {it['count']} 拾った")
@@ -1285,7 +1448,7 @@ class Game:
             seen = (m["x"], m["y"]) in self.visible
             if not m["awake"]:
                 # 意地悪 (mean) な相手は、見かけるたびに 2/3 で襲ってくる。強欲 (greedy) も目を覚ます
-                if seen and (("M" in m["flags"] and self.rnd(3) != 0) or "G" in m["flags"]):
+                if seen and (("M" in m["flags"] and self.rnd(3) != 0 and not self.wearing("stealth")) or "G" in m["flags"]):
                     m["awake"] = True
                 continue
             if m.get("slow") and self.turn % 2 == 1:  # 鈍足の杖: 1 ターンおきにしか動けない
@@ -1324,6 +1487,7 @@ class Game:
                 self.hp += 1
         elif self.quiet >= 3:
             self.hp += self.rnd(self.level - 7) + 1
+        self.hp += self.wearing("regeneration")  # 再生の指輪: 1 つにつき毎ターン +1
         if self.hp != before:
             self.hp = min(self.hp, self.max_hp)
             self.quiet = 0
@@ -1342,7 +1506,7 @@ class Game:
                 self.say("空腹で気を失った")
             return
         before = self.food_left
-        self.food_left -= 1
+        self.food_left -= 1 + self._ring_eat()
         if self.food_left < D.MORE_TIME <= before:
             self.say("空腹で力が入らない")
         elif self.food_left < 2 * D.MORE_TIME <= before:

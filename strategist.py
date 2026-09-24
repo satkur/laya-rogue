@@ -43,10 +43,11 @@ COOLDOWN = 300        # 失敗が 3 回続いたら、このターン数は呼�
 
 PLANS = ["explore_fully", "descend_asap", "free"]
 TACTICS = ["fight", "flee", "escape", "free"]
-READS = ["none", "map", "teleport"]
+READS = ["none", "map", "teleport", "remove_curse"]
+RINGS = ["none", "put_on", "remove"]
 TRIES = ["none", "potion", "scroll", "identify"]
 ZAPS = ["none", "attack", "slow", "away", "unknown"]
-FETCHES = ["none", "armor", "weapon", "food", "potion", "scroll", "wand", "gold"]
+FETCHES = ["none", "armor", "weapon", "food", "potion", "scroll", "wand", "ring", "gold"]
 FETCH_TURNS = 30      # fetch (その種類の品を拾いに行く) の有効期間
 SCHEMA = {
     "type": "object",
@@ -58,10 +59,11 @@ SCHEMA = {
         "read_now": {"type": "string", "enum": READS},
         "try_now": {"type": "string", "enum": TRIES},
         "zap_now": {"type": "string", "enum": ZAPS},
+        "ring_now": {"type": "string", "enum": RINGS},
         "fetch": {"type": "string", "enum": FETCHES},
         "reason": {"type": "string"},
     },
-    "required": ["plan", "rest", "tactic", "heal_now", "read_now", "try_now", "zap_now", "fetch", "reason"],
+    "required": ["plan", "rest", "tactic", "heal_now", "read_now", "try_now", "zap_now", "ring_now", "fetch", "reason"],
     "additionalProperties": False,
 }
 
@@ -70,7 +72,8 @@ A small, fast model ("the pilot", trained by 20,000 games of self-play) picks th
 You are consulted when HP or hunger worsens, when a non-trivial monster wakes up in view, when a better weapon or armor comes into view, when the hero seems stuck, and periodically while a constraint is in force (not on arrival at a new level). Each consultation costs several seconds of real time, nothing in game time.
 
 Rules of this game (subset of Rogue 5.4.4):
-- Monsters get stronger with depth. The hero gets stronger by experience levels (killing monsters), better weapons/armor found on the floor, strength potions, and scrolls of enchant armor / enchant weapon / protect armor (applied automatically when picked up). There are no rings.
+- Monsters get stronger with depth. The hero gets stronger by experience levels (killing monsters), better weapons/armor found on the floor, strength potions, and scrolls of enchant armor / enchant weapon / protect armor (applied automatically when picked up).
+- Rings (14 kinds as in Rogue 5.4.4, one on each hand): protection +n, add strength +n, dexterity (to-hit) +n, increase damage +n, sustain strength, searching, see invisible, regeneration (+1 HP per turn), slow digestion, stealth (sleeping monsters do not notice the hero), maintain armor (no rust), adornment (nothing), aggravate monster (every monster on every level hunts the hero) and teleportation (random teleport now and then). The last two are always cursed, and the four +n kinds are cursed with -1 one time in three. A cursed ring cannot be taken off until a scroll of remove curse is read. A ring's kind is learned only from a scroll of identify: putting it on tells nothing (the pilot sees "unknown"). Most rings make hunger advance faster (regeneration the most). The pilot has "put_on_ring" (a known good ring first, otherwise an unidentified one), "remove_ring" and "read_remove_curse".
 - Wands (3 kinds, unidentified until zapped, 3-7 charges): attack (a bolt for 6d6 unless the monster resists), slow monster (it moves every other turn), teleport away (it is sent elsewhere on the level). The pilot gets "zap_attack" / "zap_slow" / "zap_away" for known wands and "zap_unknown", only when an awake monster is in a straight line. These are the answer to a monster the hero cannot beat in melee; charges do not come back.
 - Potions and scrolls are unidentified when found (only a color or a title is visible). Using one reveals its kind for the rest of the game; once a kind is known to be useless it is discarded and never picked up again. Kinds in play - potions: healing, extra healing, gain strength, restore strength, poison (strength -1 to -3, restored by restore strength), confusion (20-27 turns of stumbling). Scrolls: enchant armor, enchant weapon, protect armor (read automatically once known), magic mapping, teleportation, identify (reveals one unidentified kind the hero carries), sleep (4-7 turns helpless), create monster (a monster appears next to the hero), aggravate monsters (every monster on the level wakes up and comes). Roughly 3 in 10 unknown potions and 2 in 10 unknown scrolls are harmful. The pilot has "quaff_unknown" / "read_unknown" (tries the unknown kind it carries most of) and "read_identify".
 - Scrolls the strategist can trigger: magic mapping (reveals the whole level including the stairs; useful when the stairs are unknown and the hero needs an exit or is hungry) and teleportation (moves the hero to a random spot on the level, breaking contact with every monster; the one reliable escape when the stairs are unknown).
@@ -86,10 +89,11 @@ Your outputs:
 - rest: true = when no awake enemy is in view, only rest (or eat / drink / equip) until HP is at least 90%. Ignored while hungry-weak or worse.
 - tactic (only matters while an awake enemy is in view, and resets to "free" when no awake enemy is in view): "fight" = running away on foot is removed; attacking, the stairs and potions stay. "flee" = attacking and approaching are removed (only useful to reach the stairs or to stall a slow/held situation). "escape" = if the stairs are known, walk to them and go down now, ignoring the monster; if they are not known it behaves like "flee". "free" = no constraint. The stairs are never removed by a tactic.
 - heal_now: true = drink a healing potion on the next turn if the hero carries one.
-- read_now: "map" = read magic mapping on the next turn (if carried and the stairs are unknown); "teleport" = read teleportation on the next turn (if carried and an enemy is awake in view); "none" = nothing. One-shot.
+- read_now: "map" = read magic mapping on the next turn (if carried and the stairs are unknown); "teleport" = read teleportation on the next turn (if carried and an enemy is awake in view); "remove_curse" = read remove curse (if carried and something worn is known to be cursed); "none" = nothing. One-shot.
+- ring_now: "put_on" = put on a ring on the next turn (if one is carried and a hand is free); "remove" = take one off; "none" = nothing. One-shot.
 - zap_now: "attack" / "slow" / "away" = zap that known wand on the next turn if carried and an awake monster is in line; "unknown" = zap an unidentified wand; "none" = nothing. One-shot.
 - try_now: "potion" = drink an unidentified potion on the next turn; "scroll" = read an unidentified scroll; "identify" = read a known scroll of identify; "none" = nothing. One-shot. Testing unknown items is safest with no monster in view, full HP and the stairs known.
-- fetch: "armor" / "weapon" / "food" / "potion" / "scroll" / "wand" / "gold" = walk to the nearest item of that kind in view and pick it up, ignoring everything else while no monster is awake in view. Cleared when it is picked up, when a monster wakes up, or after 30 turns. "none" = nothing. The pilot on its own rarely detours for items (it learned that most floor items are not worth the walk), so this is how you make it collect a specific thing, e.g. better armor. A better weapon or armor is worn automatically once carried.
+- fetch: "armor" / "weapon" / "food" / "potion" / "scroll" / "wand" / "ring" / "gold" = walk to the nearest item of that kind in view and pick it up, ignoring everything else while no monster is awake in view. Cleared when it is picked up, when a monster wakes up, or after 30 turns. "none" = nothing. The pilot on its own rarely detours for items (it learned that most floor items are not worth the walk), so this is how you make it collect a specific thing, e.g. better armor. A better weapon or armor is worn automatically once carried.
 - reason: one short sentence in Japanese, shown to the player.
 
 Briefing: what was measured in this version (hundreds of games with the same pilot). Use it to calibrate, then decide for yourself.
@@ -101,11 +105,17 @@ Briefing: what was measured in this version (hundreds of games with the same pil
 - A strategist that used "explore_fully" and "fight" liberally scored 4.5; one that left everything free scored about the same as the pilot alone. Every constraint replaces the pilot's judgement, so set one only when you can say why the pilot's default would be wrong here.
 - Starting armor two points better adds about 2.4 levels of depth. Better armor found on the floor is the most valuable thing in the game; aquators (rust) are its main enemy.
 Note: scrolls and missiles were added after the measurements above; the pilot was retrained with them, and their effect on the strategist's levers is not measured yet.
-Default to plan="free", rest=false, tactic="free", heal_now=false, read_now="none", try_now="none", zap_now="none", fetch="none" and deviate with a concrete reason: for example "escape" when a deadly monster is awake, the stairs are known and the hero is not fresh; "rest"=true after a hard fight before pushing deeper; "heal_now" when critical in a fight that is otherwise winnable; "descend_asap" when hungry with no food; "flee"/"escape" from an aquator to protect good armor."""
+Default to plan="free", rest=false, tactic="free", heal_now=false, read_now="none", try_now="none", zap_now="none", ring_now="none", fetch="none" and deviate with a concrete reason: for example "escape" when a deadly monster is awake, the stairs are known and the hero is not fresh; "rest"=true after a hard fight before pushing deeper; "heal_now" when critical in a fight that is otherwise winnable; "descend_asap" when hungry with no food; "flee"/"escape" from an aquator to protect good armor."""
 
 
 def dice_text(w):
     return "+".join(f"{n}d{s}" for n, s in w["dice"]) + (f" +{w['hplus']} to hit" if w.get("hplus") else "") + (f" +{w['dplus']} dmg" if w.get("dplus") else "")
+
+
+def ring_detail(g, r):
+    if r["name"] not in g.known:
+        return "unidentified ring" + (" (cursed, cannot remove)" if r.get("cursed_known") else "")
+    return f"{r['name']}" + (f" {r['value']:+d}" if r["name"] in D.RING_VALUED else "") + (" (cursed)" if g.ring_known_cursed(r) else "")
 
 
 def item_detail(g, it):
@@ -117,7 +127,7 @@ def item_detail(g, it):
     elif k == "weapon":
         gain = g.gear_gain(it)
         s = f"{it['name']} ({dice_text(it)}, {'better' if gain > 0 else 'worse'} than worn by {abs(gain):.1f})"
-    elif k in ("potion", "scroll", "stick"):
+    elif k in ("potion", "scroll", "stick", "ring"):
         kind = "wand" if k == "stick" else k
         s = f"{kind} of {it['name']}" if it["name"] in g.known else f"unidentified {kind}"
     elif k == "gold":
@@ -146,6 +156,7 @@ def situation(g, trigger, st):
         f"Known scrolls: {', '.join(f'{n} x{c}' for n, c in g.scrolls.items() if n in g.known and c > 0) or 'none'}. "
         f"Unidentified scrolls: {sum(g.unknown_scrolls().values())} ({len(g.unknown_scrolls())} kinds). "
         f"Wands: {', '.join(f'{n} x{c}' for n, c in g.known_sticks().items()) or 'none'}; unidentified wands: {len(g.unknown_sticks())}. "
+        f"Rings worn: {', '.join(ring_detail(g, r) for r in g.worn) or 'none'}. Rings carried: {', '.join(ring_detail(g, r) for r in g.rings) or 'none'}. "
         f"Identified kinds so far: {', '.join(sorted(g.known)) or 'none'}.",
         "Status: " + (", ".join(w for w, on in (("confused", g.confused), ("held", g.held_by is not None), ("cannot act", g.no_command > 0)) if on) or "normal") + ".",
     ]
@@ -187,7 +198,8 @@ def ask(text, model=DEFAULT_MODEL, effort="high"):
         raise RuntimeError(str(out.get("result", ""))[:200])
     d = out.get("structured_output")
     if (not isinstance(d, dict) or d.get("plan") not in PLANS or d.get("tactic") not in TACTICS or d.get("read_now", "none") not in READS
-            or d.get("try_now", "none") not in TRIES or d.get("zap_now", "none") not in ZAPS or d.get("fetch", "none") not in FETCHES):
+            or d.get("try_now", "none") not in TRIES or d.get("zap_now", "none") not in ZAPS or d.get("ring_now", "none") not in RINGS
+            or d.get("fetch", "none") not in FETCHES):
         raise RuntimeError("想定外の応答: " + p.stdout[:300])
     u = out.get("usage", {})
     tokens = sum(u.get(k, 0) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"))
@@ -211,7 +223,7 @@ class Strategist:
 
     def reset(self):
         self.plan, self.rest, self.tactic, self.heal_now, self.reason = "free", False, "free", False, ""
-        self.read_now = self.try_now = self.zap_now = "none"
+        self.read_now = self.try_now = self.zap_now = self.ring_now = "none"
         self.fetch, self.fetch_until = "none", 0
         self.known_gear = set()  # すでに相談した「良い装備」 (名前, 位置)
         self.paused_until, self.pauses = -1, 0
@@ -289,6 +301,7 @@ class Strategist:
         self.read_now = d.get("read_now", "none")
         self.try_now = d.get("try_now", "none")
         self.zap_now = d.get("zap_now", "none")
+        self.ring_now = d.get("ring_now", "none")
         self.fetch = d.get("fetch", "none")
         self.fetch_until = g.turn + FETCH_TURNS
         self.history.append({"turn": g.turn, "depth": g.depth, "hp": g.hp, "max_hp": g.max_hp, "level": g.level, "kind": self.kind,
@@ -323,6 +336,11 @@ class Strategist:
         if self.zap_now != "none":
             action = {"attack": "zap_attack", "slow": "zap_slow", "away": "zap_away", "unknown": "zap_unknown"}[self.zap_now]
             self.zap_now = "none"
+            if action in valid:
+                return [action]
+        if self.ring_now != "none":
+            action = {"put_on": "put_on_ring", "remove": "remove_ring"}[self.ring_now]
+            self.ring_now = "none"
             if action in valid:
                 return [action]
         awake = any(m["awake"] for m in g.visible_monsters())

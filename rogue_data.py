@@ -138,10 +138,35 @@ SCROLL_PROBS = [("monster confusion", 7), ("magic mapping", 4), ("hold monster",
                 ("enchant weapon", 8), ("create monster", 4), ("remove curse", 7), ("aggravate monsters", 3), ("protect armor", 2)]
 # 未識別 (簡略版): 使えば正体が分かる。識別の巻物は本家の 5 種 (薬・巻物・武器・鎧・指輪杖) を 1 種にまとめ、出現率は合算 (43)
 SCROLLS_IN_PLAY = {"enchant armor", "enchant weapon", "protect armor", "magic mapping", "teleportation", "identify",
-                   "sleep", "create monster", "aggravate monsters"}
+                   "sleep", "create monster", "aggravate monsters", "remove curse"}
 BAD_SCROLLS = {"sleep", "create monster", "aggravate monsters"}
 SCROLL_JP = {"enchant armor": "鎧強化", "enchant weapon": "武器強化", "protect armor": "鎧保護", "magic mapping": "魔法の地図",
-             "teleportation": "瞬間移動", "identify": "識別", "sleep": "眠り", "create monster": "怪物召喚", "aggravate monsters": "怪物寄せ"}
+             "teleportation": "瞬間移動", "identify": "識別", "sleep": "眠り", "create monster": "怪物召喚", "aggravate monsters": "怪物寄せ",
+             "remove curse": "解呪"}
+
+# 指輪 (ring_info の出現率、rings.c、things.c の new_thing)。本家の 14 種すべて。落ちている物の 4%。両手に 1 つずつ着けられる
+# 防御・力・命中・ダメージは値が rnd(3): 0 なら −1 で呪い、1 か 2 なら +1 / +2。怪物寄せ・瞬間移動は常に呪い。呪われた指輪は外せない (解呪の巻物で解ける)
+# 正体は識別の巻物でしか分からない (着けても名前は付かない。本家どおり、NOTES.md 15 章)
+RING_PROBS = [("protection", 9), ("add strength", 9), ("sustain strength", 5), ("searching", 10), ("see invisible", 10), ("adornment", 1),
+              ("aggravate monster", 10), ("dexterity", 8), ("increase damage", 8), ("regeneration", 4), ("slow digestion", 9),
+              ("teleportation", 5), ("stealth", 7), ("maintain armor", 5)]
+RING_KINDS = {k for k, _ in RING_PROBS}
+RING_VALUED = {"protection", "add strength", "dexterity", "increase damage"}   # 値 (+n / −1) を持つ
+RING_CURSED = {"aggravate monster", "teleportation"}                           # 常に呪い
+RING_JP = {"protection": "防御", "add strength": "力", "sustain strength": "力の維持", "searching": "探索", "see invisible": "透明視",
+           "adornment": "飾り", "aggravate monster": "怪物寄せ", "dexterity": "命中", "increase damage": "ダメージ", "regeneration": "再生",
+           "slow digestion": "消化", "teleportation": "瞬間移動", "stealth": "隠密", "maintain armor": "鎧の維持"}
+# 着けているあいだの空腹の増加 (rings.c の ring_eat)。正なら毎ターンその分、負なら 1/n の確率で 1。消化だけは符号が逆 (1/2 で 1 減らない)
+RING_EAT = {"protection": 1, "add strength": 1, "sustain strength": 1, "searching": -3, "see invisible": -5, "adornment": 0,
+            "aggravate monster": 0, "dexterity": -3, "increase damage": -3, "regeneration": 2, "slow digestion": -2, "teleportation": 0,
+            "stealth": 1, "maintain armor": 1}
+# 正体の分かった有益な指輪を着ける順 (プログラムが「どれを着けるか」だけ決める。着けるかどうかは Laya)
+RING_WORTH = {"regeneration": 6, "protection": 5, "increase damage": 5, "dexterity": 4, "add strength": 4, "slow digestion": 3, "stealth": 3,
+              "maintain armor": 2, "sustain strength": 2, "see invisible": 2, "searching": 1}
+# 未識別のあいだの見た目 (init.c の stones)
+RING_STONES = ["瑪瑙", "アレキサンドライト", "紫水晶", "紅玉髄", "ダイヤモンド", "エメラルド", "ゲルマニウム", "花崗岩", "ガーネット", "翡翠",
+               "クリプトナイト", "瑠璃", "月長石", "黒曜石", "縞瑪瑙", "オパール", "真珠", "ペリドット", "ルビー", "サファイア", "スチボタンタライト",
+               "虎目石", "トパーズ", "トルコ石", "ターフェアイト"]
 ENCHANT_SCROLLS = ("enchant armor", "enchant weapon", "protect armor")   # 読めば必ず得をする巻物 (拾った時点で読む)
 
 # 杖 (ws_info の出現率)。判断ボードの回答で 3 種にまとめる: 攻撃 = striking 9 + lightning 3 + fire 3 + cold 3 + magic missile 10、

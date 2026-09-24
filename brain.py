@@ -30,7 +30,10 @@ ACTION_DESC = {
     "read_teleport": "Read the scroll of teleportation.",
     "quaff_unknown": "Drink an unidentified potion; you learn what it was.",
     "read_unknown": "Read an unidentified scroll; you learn what it was.",
-    "read_identify": "Read the scroll of identify to learn what one unidentified potion, scroll or wand you carry is.",
+    "read_identify": "Read the scroll of identify to learn what one unidentified potion, scroll, wand or ring you carry is.",
+    "read_remove_curse": "Read the scroll of remove curse: the cursed ring, armor or weapon you wear can be taken off again.",
+    "put_on_ring": "Put on a ring (a known good one first, otherwise an unidentified one); it works while worn, costs food, and may be cursed.",
+    "remove_ring": "Take off a ring you wear (a useless one first, otherwise an unidentified one); fails if it is cursed.",
     "zap_attack": "Zap the wand of attack at the enemy in line: a bolt that hurts it badly unless it resists.",
     "zap_slow": "Zap the wand of slow monster at the enemy in line: it then moves only every other turn.",
     "zap_away": "Zap the wand of teleport away at the enemy in line: it is sent somewhere else on this level.",
@@ -71,6 +74,14 @@ def scroll_words(g):
     kinds = [w for w, name in (("map", "magic mapping"), ("teleport", "teleportation"), ("identify", "identify"))
              if g.scrolls.get(name) and name in g.known]
     return ", ".join(kinds) if kinds else "none"
+
+
+def ring_words(g):
+    """着けている指輪。正体が分かっていれば種類、まだなら unknown (識別の巻物でしか分からない)。"""
+    if not g.worn:
+        return "none"
+    names = [r["name"].replace(" ", "-") if r["name"] in g.known else "unknown" for r in g.worn]
+    return ", ".join(w + (" (cursed)" if g.ring_known_cursed(r) else "") for w, r in zip(names, g.worn))
 
 
 def wand_words(g):
@@ -119,8 +130,10 @@ def describe(g, valid):
              f"Missiles: {count_word(sum(g.missiles.values()))}.", f"Scrolls: {scroll_words(g)}.",
              f"Unidentified potions: {count_word(sum(g.unknown_potions().values()))}.",
              f"Unidentified scrolls: {count_word(sum(g.unknown_scrolls().values()))}.",
-             f"Wands: {wand_words(g)}.", f"Unidentified wands: {count_word(len(g.unknown_sticks()))}."]
-    status = [w for w, on in (("confused", g.confused), ("held", g.held_by is not None), ("weakened", g.str < g.max_str)) if on]
+             f"Wands: {wand_words(g)}.", f"Unidentified wands: {count_word(len(g.unknown_sticks()))}.",
+             f"Rings worn: {ring_words(g)}.", f"Unidentified rings carried: {count_word(sum(1 for r in g.rings if r['name'] not in g.known))}."]
+    status = [w for w, on in (("confused", g.confused), ("held", g.held_by is not None), ("weakened", g.base_str() < g.max_str),
+                              ("cursed", g.cursed_worn())) if on]
     if status:
         parts.append("Status: " + ", ".join(status) + ".")
     if mons:
@@ -155,7 +168,8 @@ def coarse_key(g, valid):
     else:
         enemy = "none"
     hunger = g.hunger_word()
-    flags = "".join(c for c, on in (("H", g.held_by is not None), ("C", g.confused), ("G", bool(g.visible_upgrades()))) if on)  # G: 良い装備が見えている
+    flags = "".join(c for c, on in (("H", g.held_by is not None), ("C", g.confused), ("G", bool(g.visible_upgrades())),
+                                     ("K", bool(g.cursed_worn()))) if on)  # G: 良い装備が見えている、K: 呪われた物を着けている
     return "|".join([hp_word(g), "starving" if hunger in ("weak", "fainting") else hunger, enemy, flags, pace_word(g), ",".join(valid)])
 
 
@@ -274,6 +288,14 @@ class RuleBrain:
             a = "equip"
         elif "eat" in valid and g.hunger_word() != "fine":
             a = "eat"
+        elif g.hunger_word() != "fine" and not g.food and "remove_ring" in valid:  # 食料がないのに指輪で空腹が進む
+            a = "remove_ring"
+        elif not mons and "read_remove_curse" in valid:
+            a = "read_remove_curse"
+        elif not mons and "remove_ring" in valid and g.ring_useless(g._ring_to_remove()):
+            a = "remove_ring"
+        elif not mons and "put_on_ring" in valid and (g.hunger_word() == "fine" or g.food):
+            a = "put_on_ring"
         elif not mons and "read_identify" in valid:
             a = "read_identify"
         elif not mons and hp != "critical" and "quaff_unknown" in valid:
@@ -322,12 +344,20 @@ class DiverBrain:
             a = "zap_unknown"
         elif "eat" in valid and g.hunger_word() != "fine":
             a = "eat"
+        elif g.hunger_word() != "fine" and not g.food and "remove_ring" in valid:  # 食料がないのに指輪で空腹が進む
+            a = "remove_ring"
         elif not awake and "quaff_str" in valid:
             a = "quaff_str"
         elif not awake and "equip" in valid:
             a = "equip"
         elif not awake and "read_map" in valid:
             a = "read_map"
+        elif not mons and "read_remove_curse" in valid:
+            a = "read_remove_curse"
+        elif not mons and "remove_ring" in valid and g.ring_useless(g._ring_to_remove()):
+            a = "remove_ring"
+        elif not mons and "put_on_ring" in valid and (g.hunger_word() == "fine" or g.food):
+            a = "put_on_ring"
         elif not mons and "read_identify" in valid:
             a = "read_identify"
         elif not mons and hp != "critical" and "quaff_unknown" in valid:
