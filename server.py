@@ -25,7 +25,7 @@ HOST, PORT = "127.0.0.1", 8766
 STATIC = Path(__file__).parent / "static"
 brain = None
 LLM_MODEL = sys.argv[sys.argv.index("--llm-model") + 1] if "--llm-model" in sys.argv else DEFAULT_MODEL
-DEFAULT_GENERATION = "gen21"  # 既定は「測定済みの最良」を固定 (weights/ の最新番号は未測定のことがある。gen22 は待機が多い、NOTES 13 章)
+DEFAULT_GENERATION = "gen24"  # 既定は「測定済みの最良」を固定 (weights/ の最新番号は未測定のことがある。gen24 8.88 / gen21 8.33、NOTES 13 章)
 GENERATION = sys.argv[sys.argv.index("--gen") + 1] if "--gen" in sys.argv else DEFAULT_GENERATION
 adviser = Strategist(model=LLM_MODEL, enabled="--llm" in sys.argv)  # いまは付けると成績が下がるので既定は切 (NOTES.md 6 章)
 strategist_mod.MAX_CALLS_TOTAL = 300  # 画面を開きっぱなしにしても、ここで方針役は自動で止まる (画面で入れ直すと再開)
