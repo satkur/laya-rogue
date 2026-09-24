@@ -158,6 +158,7 @@ class Game:
         c.log = []
         c._dist = None
         c._explore = list(self._explore)
+        c._goal = (list(self._goal[0]), self._goal[1])
         c._search_path = list(self._search_path)
         return c
 
@@ -251,7 +252,7 @@ class Game:
         self.visible = set()
         self.newly_seen = []
         self._dist = None
-        self._explore = []
+        self._explore, self._goal = [], ([], None)
         # 歩けるマスごとの「1 歩で行けるマス」と「周囲 8 マス」。階の途中で変わらないので複製とも共有する
         cells = [(x, y) for y in range(H) for x in range(W) if self.tiles[y][x] in PASSABLE]
         self._nbr = {c: tuple((c[0] + dx, c[1] + dy) for dx, dy in DIRS if self._step_ok(c[0], c[1], c[0] + dx, c[1] + dy))
@@ -463,7 +464,16 @@ class Game:
         return None
 
     def _step_toward(self, target):
-        path = self._bfs_path(lambda c: c == target)
+        """target への 1 歩。経路は使い回し、無効になったときだけ探し直す (探索と同じ)。
+
+        毎ターン引き直すと、眠った敵が見える位置では避ける遠回りの一歩、見えない位置では最短の一歩と入れ替わり、
+        2 マスを永遠に往復して餓死した (rules で 500 回中 16 回、NOTES 13 章)。"""
+        path, tgt = self._goal
+        if path and path[0] == (self.hx, self.hy):  # 前のターンの一歩を踏んだ
+            path = path[1:]
+        if not (tgt == target and path and path[0] in self._nbr[(self.hx, self.hy)] and self._monster_at(*path[0]) is None):
+            path = self._bfs_path(lambda c: c == target) or []
+        self._goal = (path, target)
         return path[0] if path else None
 
     def _frontier(self, c):
@@ -492,7 +502,7 @@ class Game:
         if self.seen[y][x]:
             self.newly_seen.append((x, y, DOOR))
         self._wall_spots = self._find_wall_spots()
-        self._explore, self._search_path = [], []
+        self._explore, self._search_path, self._goal = [], [], ([], None)
         self.say("隠し扉を見つけた")
 
     def _find_wall_spots(self):
@@ -662,7 +672,7 @@ class Game:
         taken = {(m["x"], m["y"]) for m in self.monsters} | {(self.hx, self.hy)}
         self.hx, self.hy = self._floor_spot(self.rng.choice(real), taken)
         self.held_by, self.vf_hit = None, 0
-        self._explore = []
+        self._explore, self._goal = [], ([], None)
         self._look()
 
     # ------------------------------------------------------------------ 罠 (move.c の be_trapped)
@@ -928,7 +938,7 @@ class Game:
             v.append("explore")
         elif D.HIDDEN_DOORS and free and not self.stairs_known() and self._search_target() is not None:
             v.append("search")
-        if free and self.stairs_known():
+        if free and self.stairs_known() and ((self.hx, self.hy) == self.stairs or self._step_toward(self.stairs)):  # 見えているだけで既知のマスでは繋がっていない階段は選べない (NOTES 13 章)
             v.append("descend")
         # 安全弁 (NOTES 13 章): HP 90% 以上で敵が起きておらず空腹でもなければ待つ理由がない。他に取れる行動があるときだけ外す
         if not (self.hp >= 0.9 * self.max_hp and not awake and self.hunger_word() == "fine" and any(a in v for a in ("explore", "pick_up", "descend", "search"))):
@@ -1068,7 +1078,7 @@ class Game:
                     if self.tiles[y][x] != ROCK and not self.seen[y][x] and (x, y) not in self.mapped:
                         self.mapped.add((x, y))
                         self.newly_seen.append((x, y, self.tiles[y][x]))
-            self._explore = []
+            self._explore, self._goal = [], ([], None)
             self.say("この階の地図が頭に浮かんだ")
         elif name == "teleportation":
             self._teleport()

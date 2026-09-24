@@ -102,7 +102,7 @@ def standard_hero(depth):
     return st
 
 
-STALL_TURNS = 300  # この連続ターン数、階段未発見・探索の縁なし・起きた敵なしが続いたら「行き詰まり」として記録する
+STALL_TURNS, STALL_TILES = 300, 4  # この連続ターン数のあいだ踏んだマスが STALL_TILES 種類以下で、休憩も戦闘もしておらず、起きた敵も見えていなければ「行き詰まり」
 
 
 def play(brain, seed, max_turns, start=None):
@@ -110,23 +110,21 @@ def play(brain, seed, max_turns, start=None):
     if hasattr(brain, "rng"):  # 行動を引く乱数もゲームごとにシードで決める。共有したままだと同じ重みでも並べる順で結果が変わる
         brain.rng = random.Random(seed)
     ms, miss, n = [], 0, 0
-    stalls, stuck, stuck_depth = [], 0, 0  # 行き詰まり: 階段が見つからないのに探索の縁が尽き、敵もいない状態が続く (NOTES 13 章)
+    stalls, trail, acts, stall_depth = [], [], [], 0  # 行き詰まり: 敵もいないのに数マスを往復し続ける (NOTES 13 章)
     while not g.over and g.turn < max_turns:
         d = brain.decide(g)
         n += 1
         miss += d.get("miss", False)
         if d["ms"]:
             ms.append(d["ms"])
+        trail.append((g.depth, g.hx, g.hy))
+        acts.append(d["action"])
         g.step(d["action"])
         g.log.clear()
-        if g.depth != stuck_depth:
-            stuck, stuck_depth = 0, g.depth
-        if not g.over and not g.stairs_known() and not g._explore and not any(m["awake"] for m in g.visible_monsters()):
-            stuck += 1
-            if stuck == STALL_TURNS:
-                stalls.append([g.depth, g.turn])
-        else:
-            stuck = 0
+        if (len(trail) >= STALL_TURNS and stall_depth != g.depth and len(set(trail[-STALL_TURNS:])) <= STALL_TILES
+                and not ({"rest", "attack", "throw"} & set(acts[-STALL_TURNS:])) and not any(m["awake"] for m in g.visible_monsters())):
+            stalls.append([g.depth, g.turn])
+            stall_depth = g.depth  # 同じ階では 1 回だけ記録
     end = "到達" if g.won else g.cause if g.dead else "時間切れ"
     return dict(depth=g.depth, level=g.level, kills=g.kills, gold=g.gold, turn=g.turn, end=end, ms=ms, miss=miss / max(1, n), stalls=stalls)
 
