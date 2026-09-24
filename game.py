@@ -48,7 +48,11 @@ HERO_FIELDS = ("kills", "gold", "level", "exp", "str", "max_str", "hp", "max_hp"
 
 class Game:
     def __init__(self, seed=None, start=None):
-        """start に hero_state() の結果を渡すと、その勇者でその階から始める (学習で深い階を練習するため)。"""
+        """start に hero_state() の結果を渡すと、その勇者でその階から始める (学習で深い階を練習するため)。
+        seed を省略すると乱数で決めて self.seed に残す (デモの地図をあとから sim.py --seeds で再現するため)。"""
+        if seed is None:
+            seed = random.randrange(1_000_000)
+        self.seed = seed
         self.rng = random.Random(seed)
         self.depth = 0
         self.turn = 0
@@ -64,6 +68,7 @@ class Game:
         self.weapon = dict(name=name, dice=parse_dice(dmg), hplus=hplus, dplus=dplus)
         self.armor = dict(name=D.INIT_ARMOR[0], ac=D.INIT_ARMOR[1])
         self.gear = []                          # 拾ったが装備していない武器・防具
+        self.pick_kind = None                   # 方針役の fetch: この種類の品を優先して拾いに行く (None なら良い装備 → 最寄りの順)
         self.bow = True                         # 弓を持っているか (初期装備)。持っていれば矢に弓の威力が乗る
         self.missiles = {"arrow": D.INIT_ARROWS[0] + self.rnd(D.INIT_ARROWS[1])}  # 投げる物: 名前 -> 本数
         self.scrolls = {}                       # 巻物: 名前 -> 枚数
@@ -153,6 +158,7 @@ class Game:
         c.log = []
         c._dist = None
         c._explore = list(self._explore)
+        c._goal = (list(self._goal[0]), self._goal[1])
         c._search_path = list(self._search_path)
         return c
 
@@ -246,7 +252,7 @@ class Game:
         self.visible = set()
         self.newly_seen = []
         self._dist = None
-        self._explore = []
+        self._explore, self._goal = [], ([], None)
         # 歩けるマスごとの「1 歩で行けるマス」と「周囲 8 マス」。階の途中で変わらないので複製とも共有する
         cells = [(x, y) for y in range(H) for x in range(W) if self.tiles[y][x] in PASSABLE]
         self._nbr = {c: tuple((c[0] + dx, c[1] + dy) for dx, dy in DIRS if self._step_ok(c[0], c[1], c[0] + dx, c[1] + dy))
@@ -458,7 +464,16 @@ class Game:
         return None
 
     def _step_toward(self, target):
-        path = self._bfs_path(lambda c: c == target)
+        """target への 1 歩。経路は使い回し、無効になったときだけ探し直す (探索と同じ)。
+
+        毎ターン引き直すと、眠った敵が見える位置では避ける遠回りの一歩、見えない位置では最短の一歩と入れ替わり、
+        2 マスを永遠に往復して餓死した (rules で 500 回中 16 回、NOTES 13 章)。"""
+        path, tgt = self._goal
+        if path and path[0] == (self.hx, self.hy):  # 前のターンの一歩を踏んだ
+            path = path[1:]
+        if not (tgt == target and path and path[0] in self._nbr[(self.hx, self.hy)] and self._monster_at(*path[0]) is None):
+            path = self._bfs_path(lambda c: c == target) or []
+        self._goal = (path, target)
         return path[0] if path else None
 
     def _frontier(self, c):
@@ -487,7 +502,7 @@ class Game:
         if self.seen[y][x]:
             self.newly_seen.append((x, y, DOOR))
         self._wall_spots = self._find_wall_spots()
-        self._explore, self._search_path = [], []
+        self._explore, self._search_path, self._goal = [], [], ([], None)
         self.say("隠し扉を見つけた")
 
     def _find_wall_spots(self):
@@ -657,7 +672,7 @@ class Game:
         taken = {(m["x"], m["y"]) for m in self.monsters} | {(self.hx, self.hy)}
         self.hx, self.hy = self._floor_spot(self.rng.choice(real), taken)
         self.held_by, self.vf_hit = None, 0
-        self._explore = []
+        self._explore, self._goal = [], ([], None)
         self._look()
 
     # ------------------------------------------------------------------ 罠 (move.c の be_trapped)
@@ -769,18 +784,43 @@ class Game:
             self.say(f"勇者は{m['jp']}に倒された…")
 
     # ------------------------------------------------------------------ 行動
+    def gear_gain(self, it):
+        """武器・防具 it を装備したときの得 (防具は防御の改善、武器は 1 撃の平均ダメージの改善)。それ以外の品は 0。"""
+        if it["kind"] == "armor":
+            return self.armor["ac"] - it["ac"]
+        if it["kind"] == "weapon":
+            return (avg_dice(it["dice"]) + it["dplus"] + it["hplus"] * 0.5) - (avg_dice(self.weapon["dice"]) + self.weapon["dplus"] + self.weapon["hplus"] * 0.5)
+        return 0
+
     def _better_gear(self):
-        best = None
-        for g in self.gear:
-            if g["kind"] == "armor" and g["ac"] < self.armor["ac"]:
-                gain = self.armor["ac"] - g["ac"]
-            elif g["kind"] == "weapon":
-                gain = (avg_dice(g["dice"]) + g["dplus"] + g["hplus"] * 0.5) - (avg_dice(self.weapon["dice"]) + self.weapon["dplus"] + self.weapon["hplus"] * 0.5)
-            else:
-                continue
-            if gain > 0 and (best is None or gain > best[0]):
-                best = (gain, g)
-        return best[1] if best else None
+        best = max(self.gear, key=self.gear_gain, default=None)
+        return best if best is not None and self.gear_gain(best) > 0 else None
+
+    def visible_upgrades(self):
+        """見えている品のうち、着ている物より良い武器・防具 (近い順)。"""
+        return [i for i in self.visible_items() if self.gear_gain(i) > 0]
+
+    def pick_target(self):
+        """「回収」で向かう品。方針役の fetch があればその種類の最寄り、なければ良い装備、それも無ければ最寄りの品。"""
+        items = self.visible_items()
+        if not items:
+            return None
+        if self.pick_kind:
+            wanted = [i for i in items if i["kind"] == self.pick_kind]
+            if wanted:  # 武器・防具なら、その種類のうち最も得な品 (最寄りが悪い方だと無駄足になる)
+                return max(wanted, key=self.gear_gain) if self.pick_kind in ("armor", "weapon") else wanted[0]
+        ups = [i for i in items if self.gear_gain(i) > 0]
+        return ups[0] if ups else items[0]
+
+    def explored_ratio(self):
+        """この階の岩以外のマスのうち、見たことのある割合。"""
+        total = seen = 0
+        for y in range(H):
+            for x in range(W):
+                if self.tiles[y][x] != ROCK:
+                    total += 1
+                    seen += self.seen[y][x]
+        return seen / max(1, total)
 
     def has_heal(self):
         """正体の分かっている回復薬の数。未識別の物は数えない (飲んでみるまで何か分からない)。"""
@@ -898,9 +938,11 @@ class Game:
             v.append("explore")
         elif D.HIDDEN_DOORS and free and not self.stairs_known() and self._search_target() is not None:
             v.append("search")
-        if free and self.stairs_known():
+        if free and self.stairs_known() and ((self.hx, self.hy) == self.stairs or self._step_toward(self.stairs)):  # 見えているだけで既知のマスでは繋がっていない階段は選べない (NOTES 13 章)
             v.append("descend")
-        v.append("rest")
+        # 安全弁 (NOTES 13 章): HP 90% 以上で敵が起きておらず空腹でもなければ待つ理由がない。他に取れる行動があるときだけ外す
+        if not (self.hp >= 0.9 * self.max_hp and not awake and self.hunger_word() == "fine" and any(a in v for a in ("explore", "pick_up", "descend", "search"))):
+            v.append("rest")
         return v
 
     def stairs_known(self):
@@ -1036,7 +1078,7 @@ class Game:
                     if self.tiles[y][x] != ROCK and not self.seen[y][x] and (x, y) not in self.mapped:
                         self.mapped.add((x, y))
                         self.newly_seen.append((x, y, self.tiles[y][x]))
-            self._explore = []
+            self._explore, self._goal = [], ([], None)
             self.say("この階の地図が頭に浮かんだ")
         elif name == "teleportation":
             self._teleport()
@@ -1156,9 +1198,9 @@ class Game:
             self.food_left = min(D.STOMACH_SIZE, max(0, self.food_left) + D.HUNGER_TIME - 200 + self.rnd(400))
             self.say("食事をした")
         elif action == "pick_up":
-            items = self.visible_items()
-            if items:
-                self._move_to(self._step_toward((items[0]["x"], items[0]["y"])))
+            it = self.pick_target()
+            if it:
+                self._move_to(self._step_toward((it["x"], it["y"])))
         elif action == "equip":
             g = self._better_gear()
             if g:

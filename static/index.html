@@ -239,12 +239,14 @@ ws.onmessage = ev => {
 
 // ---------------------------------------------------------------- controls
 let paused = false;
-const TRIGGER_JP = { floor: "階に到着", hp: "体力低下", hunger: "空腹", danger: "強敵", stuck: "足踏み", periodic: "見回り" };
+const TRIGGER_JP = { floor: "階に到着", hp: "体力低下", hunger: "空腹", danger: "強敵", gear: "良い装備", stuck: "足踏み", periodic: "見回り" };
+const FETCH_JP = { armor: "防具", weapon: "武器", food: "食料", potion: "薬", scroll: "巻物", wand: "杖", gold: "金貨" };
 const PLAN_JP = { explore_fully: "この階を探索し切る", descend_asap: "階段を見つけ次第降りる", free: "おまかせ" };
 const TACTIC_JP = { fight: "戦え", flee: "逃げろ", escape: "階段で離脱" };
 let adviser = null;
 function planText(a) {
-  return [PLAN_JP[a.plan] ?? a.plan, a.rest ? "傷は休んで治す" : null, TACTIC_JP[a.tactic] ? `敵には「${TACTIC_JP[a.tactic]}」` : null].filter(Boolean).join(" / ");
+  return [PLAN_JP[a.plan] ?? a.plan, a.rest ? "傷は休んで治す" : null, TACTIC_JP[a.tactic] ? `敵には「${TACTIC_JP[a.tactic]}」` : null,
+          FETCH_JP[a.fetch] ? `${FETCH_JP[a.fetch]}を拾いに行く` : null].filter(Boolean).join(" / ");
 }
 function setAdviser(a) {
   adviser = a;

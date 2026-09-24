@@ -1,4 +1,4 @@
-"""画面なしで何回も潜らせて、頭脳ごとの腕前を比べる。目標は地下 20 階。
+"""画面なしで何回も潜らせて、頭脳ごとの腕前を比べる。目標は地下 26 階 (rogue_data.GOAL_DEPTH)。
 
     uv run sim.py [回数] [最大ターン] [頭脳...] [--seeds 5003,5007]
 
@@ -102,21 +102,31 @@ def standard_hero(depth):
     return st
 
 
+STALL_TURNS, STALL_TILES = 300, 4  # この連続ターン数のあいだ踏んだマスが STALL_TILES 種類以下で、休憩も戦闘もしておらず、起きた敵も見えていなければ「行き詰まり」
+
+
 def play(brain, seed, max_turns, start=None):
     g = Game(seed, standard_hero(start) if start else None)
     if hasattr(brain, "rng"):  # 行動を引く乱数もゲームごとにシードで決める。共有したままだと同じ重みでも並べる順で結果が変わる
         brain.rng = random.Random(seed)
     ms, miss, n = [], 0, 0
+    stalls, trail, acts, stall_depth = [], [], [], 0  # 行き詰まり: 敵もいないのに数マスを往復し続ける (NOTES 13 章)
     while not g.over and g.turn < max_turns:
         d = brain.decide(g)
         n += 1
         miss += d.get("miss", False)
         if d["ms"]:
             ms.append(d["ms"])
+        trail.append((g.depth, g.hx, g.hy))
+        acts.append(d["action"])
         g.step(d["action"])
         g.log.clear()
+        if (len(trail) >= STALL_TURNS and stall_depth != g.depth and len(set(trail[-STALL_TURNS:])) <= STALL_TILES
+                and not ({"rest", "attack", "throw"} & set(acts[-STALL_TURNS:])) and not any(m["awake"] for m in g.visible_monsters())):
+            stalls.append([g.depth, g.turn])
+            stall_depth = g.depth  # 同じ階では 1 回だけ記録
     end = "到達" if g.won else g.cause if g.dead else "時間切れ"
-    return dict(depth=g.depth, level=g.level, kills=g.kills, gold=g.gold, turn=g.turn, end=end, ms=ms, miss=miss / max(1, n))
+    return dict(depth=g.depth, level=g.level, kills=g.kills, gold=g.gold, turn=g.turn, end=end, ms=ms, miss=miss / max(1, n), stalls=stalls)
 
 
 def _cpu_job(args):
@@ -141,7 +151,7 @@ def report(name, rs, dt):
     ends = Counter(r["end"] for r in rs)
     se = statistics.stdev(depth) / len(depth) ** 0.5 if len(depth) > 1 else 0.0
     print(f"[{name:24s}] 到達階 平均 {statistics.mean(depth):5.2f} ±{se:.2f} 中央 {statistics.median(depth):4.1f} 最高 {max(depth):2d} | "
-          f"10階+ {sum(d >= 10 for d in depth):2d} 20階 {ends['到達']:2d} /{len(rs)} | Lv {statistics.mean(r['level'] for r in rs):4.1f} | "
+          f"10階+ {sum(d >= 10 for d in depth):2d} 到達 {ends['到達']:2d} /{len(rs)} | Lv {statistics.mean(r['level'] for r in rs):4.1f} | "
           f"撃破 {statistics.mean(r['kills'] for r in rs):5.1f} | 金貨 {statistics.mean(r['gold'] for r in rs):5.0f} | ターン {statistics.mean(r['turn'] for r in rs):5.0f}"
           + (f" | 推論 {statistics.median(ms):.1f} ms" if ms else "") + (f" | 表にない状況 {miss:.0%}" if miss else "") + f" | {dt:.0f}s", flush=True)
     print("    終わり方: " + " ".join(f"{k}×{v}" for k, v in ends.most_common(7)) + " | 死亡率 " + band_deaths(rs), flush=True)
@@ -188,6 +198,9 @@ def main():
         if start:
             full += f"@B{start}"
         report(full, results, time.perf_counter() - t0)
+        stalled = [(s, r["stalls"]) for s, r in zip(seeds, results) if r.get("stalls")]
+        if stalled:
+            print(f"    行き詰まり {len(stalled)} 回: " + " ".join(f"種{s}@B{st[0][0]}F(t{st[0][1]})" for s, st in stalled[:12]) + (" ..." if len(stalled) > 12 else ""), flush=True)
         (DATA / f"results_{full.replace(':', '-').replace('@', '_')}.json").write_text(
             json.dumps({str(s): {k: v for k, v in r.items() if k != "ms"} for s, r in zip(seeds, results)}, ensure_ascii=False, indent=1), encoding="utf-8")
 
