@@ -65,6 +65,8 @@ ACTION_DESC = {
     "explore": "Walk toward unexplored area.",
     "search": "Search the dead ends and walls for a hidden door.",
     "descend": "Walk to the stairs and go down.",
+    "ascend": "Walk to the stairs and go up (you carry the Amulet; reaching the surface wins).",
+    "drop": "Drop a useless item to make room in your pack.",
     "rest": "Wait a turn.",
 }
 
@@ -201,6 +203,10 @@ def describe(g, valid):
                      + (f" (nearest: {monster_name(g, sensed[0])}, {dist_word(g.dist(sensed[0]['x'], sensed[0]['y']))})." if sensed else "."))
     parts.append(f"Items: {', '.join(item_word(g, i) for i in items[:3])}." if items else "Items: none.")
     parts.append("Stairs: " + ("known." if "descend" in valid else "not found."))
+    if g.rules.amulet:
+        parts.append("Amulet: " + ("carried (climb back to the surface)." if g.amulet else "not found (it lies on level 26 or deeper)."))
+    if g.pack_full():
+        parts.append("Pack: full.")
     parts.append("Unexplored area: " + ("yes." if "explore" in valid else "no."))
     return " ".join(parts)
 
@@ -231,7 +237,7 @@ def coarse_key(g, valid):
     hunger = g.hunger_word()
     flags = "".join(c for c, on in (("H", g.held_by is not None), ("C", g.confused), ("G", bool(g.visible_upgrades())),
                                      ("K", bool(g.cursed_worn())), ("S", g.on_scare()), ("B", g.blind), ("X", g.hallucinating),
-                                     ("F", g.hasted), ("L", g.levitating), ("W", g.wielding_bow())) if on)  # G: 良い装備が見えている、K: 呪われた物、S: 恐怖の巻物の上、B: 盲目、X: 幻覚、F: 加速、L: 浮遊、W: 弓
+                                     ("F", g.hasted), ("L", g.levitating), ("W", g.wielding_bow()), ("A", g.amulet)) if on)  # G: 良い装備が見えている、K: 呪われた物、S: 恐怖の巻物の上、B: 盲目、X: 幻覚、F: 加速、L: 浮遊、W: 弓、A: 魔除け
     return "|".join([hp_word(g), "starving" if hunger in ("weak", "fainting") else hunger, enemy, flags, pace_word(g), ",".join(valid)])
 
 
@@ -409,7 +415,7 @@ class RuleBrain:
         elif not awake and hp in ("wounded", "low", "critical") and g.hunger_word() == "fine":
             a = "rest"
         if a is None:
-            a = next((x for x in ("pick_up", "explore", "descend", "search") if x in valid), "rest")
+            a = next((x for x in (("drop", "ascend") if g.amulet else ("drop",)) + ("pick_up", "explore", "descend", "search") if x in valid), "rest")
         return {"action": a, "probs": {a: 1.0}, "state": "", "ms": 0.0}
 
 
@@ -501,5 +507,5 @@ class DiverBrain:
         elif not awake and hp in ("wounded", "low", "critical") and g.hunger_word() == "fine":
             a = "rest"
         else:
-            a = next((x for x in ("pick_up", "descend", "explore", "search") if x in valid), "rest")
+            a = next((x for x in (("drop", "ascend") if g.amulet else ("drop",)) + ("pick_up", "descend", "explore", "search") if x in valid), "rest")
         return {"action": a, "probs": {a: 1.0}, "state": "", "ms": 0.0}

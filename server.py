@@ -80,7 +80,7 @@ def frame(g, d, log_from):
                  "missiles": sum(g.missiles.values()), "scrolls": sum(c for k, c in g.scrolls.items() if k in g.known), "bow": g.bow,
                  "unknown_potions": sum(g.unknown_potions().values()), "unknown_scrolls": sum(g.unknown_scrolls().values()),
                  "wands": sum(g.known_sticks().values()), "unknown_wands": len(g.unknown_sticks()),
-                 "rings": [g.ring_label(r) for r in g.worn], "ring_bag": len(g.rings),
+                 "rings": [g.ring_label(r) for r in g.worn], "ring_bag": len(g.rings), "amulet": g.amulet,
                  "status": [w for w, on in (("混乱", g.confused), ("拘束", g.held_by is not None), ("足止め", g.no_move), ("行動不能", g.no_command),
                                             ("加速", g.hasted), ("浮遊", g.levitating), ("盲目", g.blind), ("幻覚", g.hallucinating),
                                             ("怪物探知", g.detecting()), ("恐怖の巻物の上", g.on_scare())) if on]},
