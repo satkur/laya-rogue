@@ -171,7 +171,7 @@ MISSILES = {"arrow", "dart", "shuriken", "dagger", "spear"}   # 投げる物と�
 STACKED = {"arrow", "dart", "shuriken"}                        # まとまって落ちている (rnd(8) + 8 本)
 INIT_ARROWS = (25, 15)                                        # 初期装備の矢: 25 + rnd(15) 本 (init.c)。弓も持って始まる
 
-# 巻物 (scr_info の出現率)。実装しているのは SCROLLS_IN_PLAY の 9 種 (解呪・混乱・拘束・恐怖・食料探知は判断ボードでオミット)
+# 巻物 (scr_info の出現率)。本家の 18 種すべて (scrolls.c)。識別 5 種は NORMAL / HARD では 1 種 "identify" にまとめる (rules.identify)
 SCROLL_PROBS = [("monster confusion", 7), ("magic mapping", 4), ("hold monster", 2), ("sleep", 3), ("enchant armor", 7),
                 ("identify potion", 10), ("identify scroll", 10), ("identify weapon", 6), ("identify armor", 7),
                 ("identify ring, wand or staff", 10), ("scare monster", 3), ("food detection", 2), ("teleportation", 5),
