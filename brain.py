@@ -39,6 +39,11 @@ ACTION_DESC = {
     "read_hold": "Read the scroll of hold monster: the awake enemies within two steps freeze until you hit them.",
     "drop_scare": "Drop the scroll of scare monster at your feet: while you stand on it, no monster can reach you in melee.",
     "read_food": "Read the scroll of food detection: you learn where the food on this level lies.",
+    "quaff_haste": "Drink the potion of haste self: for a few turns you act twice per turn.",
+    "quaff_raise": "Drink the potion of raise level: you gain one experience level.",
+    "quaff_see_invisible": "Drink the potion of see invisible: the unseen attacker becomes visible for a long time.",
+    "quaff_detect_monsters": "Drink the potion of monster detection: for a while you sense every monster on this level.",
+    "quaff_detect_magic": "Drink the potion of magic detection: you learn where the magic items on this level lie.",
     "remove_ring": "Take off a ring you wear (a useless one first, otherwise an unidentified one); fails if it is cursed.",
     "zap_attack": "Zap the wand of attack at the enemy in line: a bolt that hurts it badly unless it resists.",
     "zap_slow": "Zap the wand of slow monster at the enemy in line: it then moves only every other turn.",
@@ -61,7 +66,10 @@ def hp_word(g):
 
 def threat_word(g, m):
     """殴り合ったらどちらが先に倒れるかの見積もり (本家の命中判定とダメージダイスから計算)。
-    行動の推奨ではなく、敵の見た目の強さ。特殊攻撃 (錆び・凍結・盗みなど) は含まないので、Laya は名前で覚えるしかない。"""
+    行動の推奨ではなく、敵の見た目の強さ。特殊攻撃 (錆び・凍結・盗みなど) は含まないので、Laya は名前で覚えるしかない。
+    幻覚中は相手が何か分からないので unknown (嘘は書かない)。"""
+    if g.hallucinating:
+        return "unknown"
     turns_to_kill = math.ceil(m["hp"] / max(0.05, g.hero_damage_per_turn(m)))
     turns_to_die = math.ceil(g.hp / max(0.05, g.monster_damage_per_turn(m)))
     r = turns_to_die / turns_to_kill
@@ -74,6 +82,19 @@ def dist_word(d):
 
 def count_word(n):
     return "none" if n == 0 else "one" if n == 1 else "several"
+
+
+def potion_words(g):
+    """回復・力以外の、正体の分かった薬。"""
+    kinds = [w for w, name in (("haste", "haste self"), ("raise-level", "raise level"), ("see-invisible", "see invisible"),
+                               ("detect-monsters", "monster detection"), ("detect-magic", "magic detection")) if g.has_potion(name)]
+    return ", ".join(kinds) if kinds else "none"
+
+
+def monster_name(g, m):
+    if g.hallucinating:
+        return "something"
+    return m["kind"] if g.can_see(m) and not (g.blind or ("I" in m["flags"] and not g.can_see_invisible())) else "something unseen"
 
 
 def scroll_words(g):
@@ -122,6 +143,8 @@ ITEM_WORD = {"stick": "wand", "missile": "missiles"}
 
 def item_word(g, it):
     """状況文の品物: 種類と距離。武器・防具は着ている物より良いか悪いかを添える (拾う価値を状況で区別できるように)。"""
+    if g.hallucinating:
+        return f"something {dist_word(g.dist(it['x'], it['y']))}"
     kind = ITEM_WORD.get(it["kind"], it["kind"])
     if it["kind"] in ("weapon", "armor"):
         kind = ("better " if g.gear_gain(it) > 0 else "worse ") + kind
@@ -134,24 +157,29 @@ def describe(g, valid):
     items = g.visible_loot()
     parts = [f"Depth: {depth_word(g.depth)}.", f"Experience for this depth: {pace_word(g)}.", f"HP {hp_word(g)}.", f"Hunger: {g.hunger_word()}.",
              f"Food: {count_word(g.food)}.", f"Healing potions: {count_word(g.has_heal())}.",
-             f"Missiles: {count_word(sum(g.missiles.values()))}.", f"Scrolls: {scroll_words(g)}.",
+             f"Missiles: {count_word(sum(g.missiles.values()))}.", f"Scrolls: {scroll_words(g)}.", f"Potions: {potion_words(g)}.",
              f"Unidentified potions: {count_word(sum(g.unknown_potions().values()))}.",
              f"Unidentified scrolls: {count_word(sum(g.unknown_scrolls().values()))}.",
              f"Wands: {wand_words(g)}.", f"Unidentified wands: {count_word(len(g.unknown_sticks()))}.",
              f"Rings worn: {ring_words(g)}.", f"Unidentified rings carried: {count_word(sum(1 for r in g.rings if r['name'] not in g.known))}."]
     status = [w for w, on in (("confused", g.confused), ("held", g.held_by is not None), ("weakened", g.base_str() < g.max_str),
-                              ("cursed", g.cursed_worn()), ("hands glowing", g.glowing)) if on]
+                              ("cursed", g.cursed_worn()), ("hands glowing", g.glowing), ("hasted", g.hasted), ("levitating", g.levitating),
+                              ("blind", g.blind), ("hallucinating", g.hallucinating)) if on]
     if status:
         parts.append("Status: " + ", ".join(status) + ".")
     if g.on_scare():
         parts.append("Standing on: scare monster scroll (monsters cannot reach you here).")
     if mons:
-        seen = ", ".join(f"{m['kind']} {dist_word(g.dist(m['x'], m['y']))} ({threat_word(g, m)}{'' if m['awake'] else ', asleep'}"
+        seen = ", ".join(f"{monster_name(g, m)} {dist_word(g.dist(m['x'], m['y']))} ({threat_word(g, m)}{'' if m['awake'] else ', asleep'}"
                          f"{', held' if m.get('held') else ''}{', confused' if m.get('confused') else ''})"
                          for m in mons[:3])
         parts.append(f"Enemies: {seen}" + (f" and {len(mons) - 3} more." if len(mons) > 3 else "."))
     else:
         parts.append("Enemies: none.")
+    if g.detecting():
+        sensed = g.sensed_monsters()
+        parts.append(f"Monsters sensed elsewhere on this level: {count_word(len(sensed))}"
+                     + (f" (nearest: {monster_name(g, sensed[0])}, {dist_word(g.dist(sensed[0]['x'], sensed[0]['y']))})." if sensed else "."))
     parts.append(f"Items: {', '.join(item_word(g, i) for i in items[:3])}." if items else "Items: none.")
     parts.append("Stairs: " + ("known." if "descend" in valid else "not found."))
     parts.append("Unexplored area: " + ("yes." if "explore" in valid else "no."))
@@ -170,7 +198,7 @@ def coarse_key(g, valid):
     held = [m for m in g.visible_monsters() if m["awake"] and m.get("held")]
     asleep = [m for m in g.visible_monsters() if not m["awake"]]
     if awake:
-        rank = {"weak": 0, "even": 1, "deadly": 2}
+        rank = {"weak": 0, "even": 1, "deadly": 2, "unknown": 1}
         worst = max(awake, key=lambda m: (rank[threat_word(g, m)], -g.dist(m["x"], m["y"])))
         enemy = f"{threat_word(g, worst)}-{special_word(worst)}-{dist_word(g.dist(worst['x'], worst['y']))}" + ("+" if len(awake) > 1 else "")
     elif held:  # 拘束した敵は殴るまで動かない
@@ -183,7 +211,8 @@ def coarse_key(g, valid):
         enemy = "none"
     hunger = g.hunger_word()
     flags = "".join(c for c, on in (("H", g.held_by is not None), ("C", g.confused), ("G", bool(g.visible_upgrades())),
-                                     ("K", bool(g.cursed_worn())), ("S", g.on_scare())) if on)  # G: 良い装備が見えている、K: 呪われた物を着けている、S: 恐怖の巻物の上
+                                     ("K", bool(g.cursed_worn())), ("S", g.on_scare()), ("B", g.blind), ("X", g.hallucinating),
+                                     ("F", g.hasted), ("L", g.levitating)) if on)  # G: 良い装備が見えている、K: 呪われた物、S: 恐怖の巻物の上、B: 盲目、X: 幻覚、F: 加速、L: 浮遊
     return "|".join([hp_word(g), "starving" if hunger in ("weak", "fainting") else hunger, enemy, flags, pace_word(g), ",".join(valid)])
 
 
@@ -288,6 +317,12 @@ class RuleBrain:
             a = "quaff_heal"
         elif hp == "critical" and deadly and "read_teleport" in valid:
             a = "read_teleport"
+        elif "quaff_see_invisible" in valid:
+            a = "quaff_see_invisible"
+        elif g.blind and "quaff_heal" in valid:
+            a = "quaff_heal"
+        elif deadly and "quaff_haste" in valid:
+            a = "quaff_haste"
         elif deadly and "read_hold" in valid:
             a = "read_hold"
         elif deadly and "read_confuse" in valid:
@@ -316,6 +351,12 @@ class RuleBrain:
             a = "remove_ring"
         elif not mons and "put_on_ring" in valid and (g.hunger_word() == "fine" or g.food):
             a = "put_on_ring"
+        elif not mons and "quaff_raise" in valid:
+            a = "quaff_raise"
+        elif not mons and g.turn - g.floor_turn < 3 and "quaff_detect_monsters" in valid:  # 新しい階に着いたら
+            a = "quaff_detect_monsters"
+        elif not mons and g.turn - g.floor_turn < 3 and "quaff_detect_magic" in valid:
+            a = "quaff_detect_magic"
         elif not mons and "read_identify" in valid:
             a = "read_identify"
         elif not mons and hp != "critical" and "quaff_unknown" in valid:
@@ -354,6 +395,12 @@ class DiverBrain:
             a = "quaff_heal"
         elif hp == "critical" and "read_teleport" in valid and any(threat_word(g, m) == "deadly" for m in awake):
             a = "read_teleport"
+        elif "quaff_see_invisible" in valid:
+            a = "quaff_see_invisible"
+        elif g.blind and "quaff_heal" in valid:
+            a = "quaff_heal"
+        elif any(threat_word(g, m) == "deadly" for m in awake) and "quaff_haste" in valid:
+            a = "quaff_haste"
         elif any(threat_word(g, m) == "deadly" for m in awake) and "read_hold" in valid:
             a = "read_hold"
         elif any(threat_word(g, m) == "deadly" for m in awake) and "read_confuse" in valid:
@@ -384,6 +431,12 @@ class DiverBrain:
             a = "remove_ring"
         elif not mons and "put_on_ring" in valid and (g.hunger_word() == "fine" or g.food):
             a = "put_on_ring"
+        elif not mons and "quaff_raise" in valid:
+            a = "quaff_raise"
+        elif not mons and g.turn - g.floor_turn < 3 and "quaff_detect_monsters" in valid:  # 新しい階に着いたら
+            a = "quaff_detect_monsters"
+        elif not mons and g.turn - g.floor_turn < 3 and "quaff_detect_magic" in valid:
+            a = "quaff_detect_magic"
         elif not mons and "read_identify" in valid:
             a = "read_identify"
         elif not mons and hp != "critical" and "quaff_unknown" in valid:

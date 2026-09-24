@@ -81,7 +81,9 @@ def frame(g, d, log_from):
                  "unknown_potions": sum(g.unknown_potions().values()), "unknown_scrolls": sum(g.unknown_scrolls().values()),
                  "wands": sum(g.known_sticks().values()), "unknown_wands": len(g.unknown_sticks()),
                  "rings": [g.ring_label(r) for r in g.worn], "ring_bag": len(g.rings),
-                 "status": [w for w, on in (("混乱", g.confused), ("拘束", g.held_by is not None), ("足止め", g.no_move), ("行動不能", g.no_command)) if on]},
+                 "status": [w for w, on in (("混乱", g.confused), ("拘束", g.held_by is not None), ("足止め", g.no_move), ("行動不能", g.no_command),
+                                            ("加速", g.hasted), ("浮遊", g.levitating), ("盲目", g.blind), ("幻覚", g.hallucinating),
+                                            ("怪物探知", g.detecting()), ("恐怖の巻物の上", g.on_scare())) if on]},
         "monsters": [{"id": m["id"], "ch": m["ch"], "x": m["x"], "y": m["y"], "hp": m["hp"], "max_hp": m["max_hp"], "awake": m["awake"]}
                      for m in g.visible_monsters()],
         "items": [{"kind": i["kind"], "x": i["x"], "y": i["y"]} for i in g.visible_items()],

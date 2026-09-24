@@ -25,12 +25,15 @@ MAXTRAPS = 10
 DIFFICULTIES = {
     "normal": dict(
         hidden_doors=False,      # 隠し扉と「捜索」(NOTES.md 9〜10 章: 判断が生まれず成績と見た目を損ねるだけだった)
+        potions_out={"blindness", "hallucination"},   # 850 ターンは長すぎる (判断ボードの回答)。引いたときは何も出ない
     ),
     "hard": dict(
         hidden_doors=True,
+        potions_out=set(),
     ),
     "original": dict(
         hidden_doors=True,
+        potions_out=set(),
     ),
 }
 
@@ -107,14 +110,19 @@ INIT_ARMOR = ("ring mail", 7 - 1)        # 名前, 防御 (+1 の ring mail)
 # 落ちている物の種類の比率 (extern.c の things)
 THING_PROBS = [("potion", 26), ("scroll", 36), ("food", 16), ("weapon", 7), ("armor", 7), ("ring", 4), ("stick", 4)]
 
-# 薬 (pot_info の出現率)。実装しているのは POTIONS_IN_PLAY の 6 種 (残りを引いたときは何も出ない = 本家より物資が少ない)
+# 薬 (pot_info の出現率)。本家の 14 種すべて (potions.c)。NORMAL では盲目と幻覚を出さない (DIFFICULTIES の potions_out。引いたときは何も出ない)
 POTION_PROBS = [("confusion", 7), ("hallucination", 8), ("poison", 8), ("gain strength", 13), ("see invisible", 3),
                 ("healing", 13), ("monster detection", 6), ("magic detection", 6), ("raise level", 2),
                 ("extra healing", 5), ("haste self", 5), ("restore strength", 13), ("blindness", 5), ("levitation", 6)]
-POTIONS_IN_PLAY = {"healing", "extra healing", "gain strength", "restore strength", "poison", "confusion"}
-BAD_POTIONS = {"poison", "confusion"}   # 正体が分かったら捨てる (本家でも使い道がない)
-POTION_JP = {"healing": "回復", "extra healing": "大回復", "gain strength": "力", "restore strength": "力の回復", "poison": "毒", "confusion": "混乱"}
-HUHDURATION = 20                        # 混乱の薬: rnd(8) + 20 ターン (potions.c)
+POTIONS_IN_PLAY = {k for k, _ in POTION_PROBS}
+BAD_POTIONS = {"poison", "confusion", "hallucination", "blindness", "levitation"}   # 飲む理由がない (行動には出さない)
+POTION_JP = {"healing": "回復", "extra healing": "大回復", "gain strength": "力", "restore strength": "力の回復", "poison": "毒", "confusion": "混乱",
+             "hallucination": "幻覚", "see invisible": "透明視", "monster detection": "怪物探知", "magic detection": "魔法探知", "raise level": "レベル上昇",
+             "haste self": "加速", "blindness": "盲目", "levitation": "浮遊"}
+HUHDURATION = 20                        # 混乱の薬: rnd(8) + 20 ターン (potions.c)。怪物探知も spread(20) ターン
+SEEDURATION = 850                       # 盲目・幻覚・透明視: spread(850) ターン (rogue.h)
+HEALTIME = 30                           # 浮遊: spread(30) ターン
+HASTE_TIME = (4, 4)                     # 加速: rnd(4) + 4 ターン (misc.c の add_haste)。加速中にもう 1 本飲むと rnd(8) ターン気絶
 # 未識別のあいだの薬の色 (extern.c の rainbow)。ゲームごとに種類へ割り当てる。表示にだけ使い、Laya には見せない
 POTION_COLORS = ["琥珀", "藍", "黒", "青", "茶", "透明", "深紅", "水", "生成", "金", "緑", "灰", "赤紫", "橙", "桃", "梅", "紫", "赤", "銀",
                  "黄土", "蜜柑", "黄玉", "青緑", "朱", "菫", "白", "黄"]

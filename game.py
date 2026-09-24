@@ -33,6 +33,7 @@ LAMP_DIST = 3
 ACTIONS = ["attack", "throw", "approach", "flee", "quaff_heal", "quaff_str", "read_map", "read_teleport",
            "quaff_unknown", "read_unknown", "read_identify", "read_remove_curse", "put_on_ring", "remove_ring",
            "read_confuse", "read_hold", "drop_scare", "read_food",
+           "quaff_haste", "quaff_raise", "quaff_see_invisible", "quaff_detect_monsters", "quaff_detect_magic",
            "zap_attack", "zap_slow", "zap_away", "zap_unknown",
            "eat", "pick_up", "equip", "explore", "search", "descend", "rest"]
 
@@ -48,6 +49,11 @@ def avg_dice(dice):
 def active(m):
     """起きていて動ける敵 (拘束の巻物で止まった敵は脅威ではない。殴ると解ける)。"""
     return m["awake"] and not m.get("held")
+
+
+# 一定ターンで切れる勇者の状態 (daemons.c の fuse)。名前 -> 切れたときの言葉
+FUSES = {"hasted": "動きが元に戻った", "levitating": "床に降りた", "blind": "目が見えるようになった", "hallucinating": "頭がはっきりした",
+         "see_invisible": "", "detecting": ""}
 
 
 HERO_FIELDS = ("kills", "gold", "level", "exp", "str", "max_str", "hp", "max_hp", "food_left", "food", "potions",
@@ -92,6 +98,9 @@ class Game:
         self._fell = False                      # 落とし穴で階を降りた直後 (その手はモンスターが動かない)
         self.confused = 0
         self.glowing = False                    # 怪物混乱の巻物を読んだ (次に当てた相手が混乱する)
+        self.fuses = {k: 0 for k in FUSES}      # 加速・浮遊・盲目・幻覚・透明視・怪物探知の残りターン
+        self._extra_move = False                # 加速中: このターンは勇者の 2 手目が残っている
+        self.floor_turn = 0                     # この階に着いたターン
         self.held_by = None                     # ハエトリグサに捕まっているとき、その id
         self.vf_hit = 0
         self.quiet = 0                          # 自然回復のカウンタ
@@ -111,6 +120,28 @@ class Game:
 
     def hero_state(self):
         return {"depth": self.depth, "difficulty": self.rules.name, **{k: copy.deepcopy(getattr(self, k)) for k in HERO_FIELDS}}
+
+    @property
+    def hasted(self):
+        return self.fuses["hasted"] > 0
+
+    @property
+    def levitating(self):
+        return self.fuses["levitating"] > 0
+
+    @property
+    def blind(self):
+        return self.fuses["blind"] > 0
+
+    @property
+    def hallucinating(self):
+        return self.fuses["hallucinating"] > 0
+
+    def can_see_invisible(self):
+        return self.fuses["see_invisible"] > 0 or self.wearing("see invisible") > 0
+
+    def detecting(self):
+        return self.fuses["detecting"] > 0
 
     @staticmethod
     def _item_names(seed):
@@ -173,6 +204,7 @@ class Game:
         c.known = set(self.known)
         c.sticks = dict(self.sticks)
         c.rings, c.worn = [dict(r) for r in self.rings], [dict(r) for r in self.worn]
+        c.fuses = dict(self.fuses)
         c.missiles, c.scrolls = dict(self.missiles), dict(self.scrolls)
         c.weapon, c.armor = dict(self.weapon), dict(self.armor)
         c.gear = [dict(x) for x in self.gear]
@@ -194,6 +226,8 @@ class Game:
             self.say(f"地下 {self.depth} 階に到達した！")
         self.no_food += 1
         self.held_by, self.vf_hit, self.no_move = None, 0, 0
+        self.floor_turn = self.turn
+        self.fuses["detecting"] = 0  # 怪物探知はその階だけ
         while True:  # どの部屋にも歩いて行ける地図ができるまで作り直す (保険。通常は 1 回で通る)
             self._build_map()
             if self._all_joined():
@@ -387,7 +421,7 @@ class Game:
             return dict(kind="food")
         if kind == "potion":
             name = self._pick(D.POTION_PROBS)[0]
-            return dict(kind="potion", name=name) if name in D.POTIONS_IN_PLAY else None
+            return dict(kind="potion", name=name) if name not in self.rules.potions_out else None
         if kind == "scroll":
             name = self._pick(D.SCROLL_PROBS)[0]
             if name.startswith("identify"):  # 本家の識別 5 種を 1 種にまとめる
@@ -428,6 +462,9 @@ class Game:
         return None
 
     def _look(self):
+        if self.blind:  # 盲目: 自分のマスしか分からない (既知の地図で歩ける)
+            self.visible = {(self.hx, self.hy)}
+            return
         vis = {(self.hx + dx, self.hy + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)
                if 0 <= self.hx + dx < W and 0 <= self.hy + dy < H}
         r = self.room_at(self.hx, self.hy)
@@ -444,8 +481,23 @@ class Game:
     def dist(self, x, y):
         return max(abs(x - self.hx), abs(y - self.hy))
 
+    def can_see(self, m):
+        """そのモンスターが見えているか。透明 (ファントム) は透明視がないと見えない。盲目のときは何も見えない。
+        見えない相手でも、いま殴られた (felt) なら隣にいることは分かる (chase.c の see_monst)。"""
+        if m.get("felt") == self.turn and self._adjacent(m):
+            return True
+        if (m["x"], m["y"]) not in self.visible or self.blind:
+            return False
+        return "I" not in m["flags"] or self.can_see_invisible()
+
     def visible_monsters(self):
-        return sorted((m for m in self.monsters if (m["x"], m["y"]) in self.visible), key=lambda m: self.dist(m["x"], m["y"]))
+        return sorted((m for m in self.monsters if self.can_see(m)), key=lambda m: self.dist(m["x"], m["y"]))
+
+    def sensed_monsters(self):
+        """怪物探知の薬で分かっている、見えていないモンスター (階全体)。"""
+        if not self.detecting():
+            return []
+        return sorted((m for m in self.monsters if not self.can_see(m)), key=lambda m: self.dist(m["x"], m["y"]))
 
     def visible_items(self):
         return sorted((i for i in self.items if (i["x"], i["y"]) in self.visible or i.get("sensed")), key=lambda i: self.dist(i["x"], i["y"]))
@@ -474,9 +526,9 @@ class Game:
         見えていないモンスターまで避けると、扉の前で眠っている 1 体のせいで「探索先なし」になり、待機しかできなくなる。
         見えている眠ったモンスターも、それを避けると道がないときだけは通る (踏み込む 1 歩は攻撃になる)。
         避け続けると、唯一の通路で眠る 1 体のせいで探索先も階段もなくなり、餓死するまで足踏みする。"""
-        visible = self.visible
-        awake = {(m["x"], m["y"]) for m in self.monsters if (m["x"], m["y"]) in visible and active(m)}
-        asleep = {(m["x"], m["y"]) for m in self.monsters if (m["x"], m["y"]) in visible and not active(m)}
+        seen = self.visible_monsters() + self.sensed_monsters()
+        awake = {(m["x"], m["y"]) for m in seen if active(m)}
+        asleep = {(m["x"], m["y"]) for m in seen if not active(m)}
         traps = {(t["x"], t["y"]) for t in self.traps if t["found"]}  # 踏んで分かった罠はよける (他に道がなければ踏んで通る)
         path = self._bfs(goal_fn, awake | asleep | traps)
         if path is None and asleep:
@@ -773,6 +825,8 @@ class Game:
 
     def _monster_attacks(self, m):
         self.quiet = 0
+        who = m["jp"] if self.can_see(m) else "何か見えないもの"
+        m["felt"] = self.turn  # 見えない相手でも、殴られればそこにいると分かる
         dice = [(self.vf_hit or 0, 1)] if m["ch"] == "F" else m["dice"]
         hit, before = False, self.hp
         for n, s in dice:
@@ -780,10 +834,10 @@ class Game:
                 self.hp -= max(0, self.roll(n, s))
                 hit = True
         if not hit:
-            self.say(f"{m['jp']}の攻撃は外れた")
+            self.say(f"{who}の攻撃は外れた")
             return
         if before > self.hp:
-            self.say(f"{m['jp']}の攻撃！ {before - self.hp} ダメージ")
+            self.say(f"{who}の攻撃！ {before - self.hp} ダメージ")
         ch = m["ch"]
         if ch == "A":
             self._rust()
@@ -877,6 +931,10 @@ class Game:
     def has_heal(self):
         """正体の分かっている回復薬の数。未識別の物は数えない (飲んでみるまで何か分からない)。"""
         return sum(self.potions.get(k, 0) for k in ("extra healing", "healing") if k in self.known)
+
+    def has_potion(self, kind):
+        """正体の分かっている薬の数。"""
+        return self.potions.get(kind, 0) if kind in self.known else 0
 
     def has_str_potion(self):
         n = self.potions.get("gain strength", 0) if "gain strength" in self.known else 0
@@ -1028,8 +1086,10 @@ class Game:
                     self.max_hp += 1
                 self.max_hp += 1
                 self.hp = self.max_hp
+            self.fuses["blind"] = 0  # 回復の薬は目を治す (sight)。大回復は幻覚も (come_down)
             if kind == "extra healing":
                 self.confused = 0
+                self.fuses["hallucinating"] = 0
             self.say("体力が回復した")
         elif kind == "restore strength":
             if self.base_str() < self.max_str:
@@ -1047,7 +1107,75 @@ class Game:
         elif kind == "confusion":
             self.confused += self.rnd(8) + D.HUHDURATION
             self.say("目が回る (混乱)")
+        elif kind == "haste self":
+            if self.hasted:  # 加速中にもう 1 本: 気絶して加速が切れる (misc.c の add_haste)
+                self.fuses["hasted"] = 0
+                self.no_command += self.rnd(8)
+                self.say("疲れ果てて気を失った")
+            else:
+                self.fuses["hasted"] = self.rnd(D.HASTE_TIME[0]) + D.HASTE_TIME[1]
+                self.say("体がずっと速く動くようになった (加速)")
+        elif kind == "raise level":
+            if self.level <= len(D.EXP_LEVELS):
+                self.exp = D.EXP_LEVELS[self.level - 1] + 1
+                self._check_level()
+            self.say("急に腕が上がった気がする (レベル上昇)")
+        elif kind == "levitation":
+            self._fuse("levitating", D.HEALTIME)
+            self.say("体が宙に浮いた (浮遊)")
+        elif kind == "blindness":
+            self._fuse("blind", D.SEEDURATION)
+            self.say("目の前が真っ暗になった (盲目)")
+            self._look()
+        elif kind == "hallucination":
+            self._fuse("hallucinating", D.SEEDURATION)
+            self.say("何もかもが宇宙的に見える (幻覚)")
+        elif kind == "see invisible":
+            self._fuse("see_invisible", D.SEEDURATION)
+            self.say("この薬は果汁の味がした (透明視)")
+        elif kind == "monster detection":
+            self._fuse("detecting", D.HUHDURATION)
+            n = len(self.sensed_monsters())
+            self.say(f"この階の怪物 {n} 体の気配を感じた (怪物探知)" if n else "一瞬妙な感じがしたが、すぐに消えた")
+        elif kind == "magic detection":
+            found = 0
+            for it in self.items:
+                if self.is_magic(it) and (it["x"], it["y"]) not in self.visible and not it.get("sensed"):
+                    it["sensed"] = True
+                    found += 1
+            self.say(f"この階の魔法の品 {found} 個の気配を感じた (魔法探知)" if found else "一瞬妙な感じがしたが、すぐに消えた")
+        if kind == "poison":
+            self.fuses["hallucinating"] = 0  # 毒は幻覚を覚ます (come_down)
         self._learn(kind)
+
+    def _fuse(self, name, n):
+        """一定ターンの状態を始める (すでに続いていれば延ばす)。長さは spread(n) (potions.c の do_pot)。"""
+        self.fuses[name] += self.spread(n)
+
+    def _run_fuses(self):
+        for name in FUSES:
+            if self.fuses[name] > 0:
+                self.fuses[name] -= 1
+                if self.fuses[name] == 0:
+                    if FUSES[name]:
+                        self.say(FUSES[name])
+                    if name == "blind":
+                        self._look()
+                    if name == "levitating":  # 降りたら足元の品を拾う
+                        self._pick_up_here()
+
+    @staticmethod
+    def is_magic(it):
+        """魔法探知に映る品 (potions.c の is_magic): 薬・巻物・指輪・杖、± の付いた武器、素の値と違う鎧か保護された鎧。"""
+        k = it["kind"]
+        if k in ("potion", "scroll", "ring", "stick", "amulet"):
+            return True
+        if k == "weapon":
+            return it["hplus"] != 0 or it["dplus"] != 0
+        if k == "armor":
+            base = next(ac for name, _, ac in D.ARMORS if name == it["name"])
+            return it["ac"] != base or bool(it.get("protected"))
+        return False
 
     def valid_actions(self):
         if self.no_command > 0:
@@ -1065,10 +1193,20 @@ class Game:
             v.append("approach")
         if free and awake:
             v.append("flee")
-        if self.has_heal() and self.hp < self.max_hp:
+        if self.has_heal() and (self.hp < self.max_hp or self.blind):
             v.append("quaff_heal")
         if self.has_str_potion():
             v.append("quaff_str")
+        if self.has_potion("haste self") and awake and not self.hasted:
+            v.append("quaff_haste")
+        if self.has_potion("raise level"):
+            v.append("quaff_raise")
+        if self.has_potion("see invisible") and not self.can_see_invisible() and any(m.get("felt") == self.turn for m in self.monsters):
+            v.append("quaff_see_invisible")
+        if self.has_potion("monster detection") and not self.detecting():
+            v.append("quaff_detect_monsters")
+        if self.has_potion("magic detection"):
+            v.append("quaff_detect_magic")
         if self.scrolls.get("magic mapping") and "magic mapping" in self.known and not self.stairs_known():
             v.append("read_map")
         if self.scrolls.get("teleportation") and "teleportation" in self.known and awake:
@@ -1102,16 +1240,17 @@ class Game:
                 v.append("zap_unknown")
         if self.food and self.food_left < 1000:
             v.append("eat")
-        if free and (target := self.pick_target()) and ((target["x"], target["y"]) in self.visible or self._step_toward((target["x"], target["y"]))):
-            v.append("pick_up")  # 探知しただけ (見えていない) の品は、既知の経路で行けるときだけ
+        if free and not self.levitating and (target := self.pick_target()) and ((target["x"], target["y"]) in self.visible
+                                                                                    or self._step_toward((target["x"], target["y"]))):
+            v.append("pick_up")  # 探知しただけ (見えていない) の品は、既知の経路で行けるときだけ。浮遊中は拾えない
         if self._better_gear():
             v.append("equip")
         if free and self._explore_step():
             v.append("explore")
         elif self.rules.hidden_doors and free and not self.stairs_known() and self._search_target() is not None:
             v.append("search")
-        if free and self.stairs_known() and ((self.hx, self.hy) == self.stairs or self._step_toward(self.stairs)):  # 見えているだけで既知のマスでは繋がっていない階段は選べない (NOTES 13 章)
-            v.append("descend")
+        if free and not self.levitating and self.stairs_known() and ((self.hx, self.hy) == self.stairs or self._step_toward(self.stairs)):
+            v.append("descend")  # 見えているだけで既知のマスでは繋がっていない階段は選べない (NOTES 13 章)。浮遊中は降りられない
         # 安全弁 (NOTES 13 章): HP 90% 以上で敵が起きておらず空腹でもなければ待つ理由がない。他に取れる行動があるときだけ外す
         if not (self.hp >= 0.9 * self.max_hp and not awake and self.hunger_word() == "fine" and any(a in v for a in ("explore", "pick_up", "descend", "search"))):
             v.append("rest")
@@ -1133,7 +1272,7 @@ class Game:
                 m = self._monster_at(nx, ny)
                 if m:
                     d = self.dist(nx, ny)
-                    if m["awake"] and (nx, ny) in self.visible and d >= 2 and (best is None or d < best[1]):
+                    if m["awake"] and self.can_see(m) and d >= 2 and (best is None or d < best[1]):
                         best = (m, d, (x, y))
                     break
                 x, y = nx, ny
@@ -1151,7 +1290,7 @@ class Game:
                 m = self._monster_at(nx, ny)
                 if m:
                     d = self.dist(nx, ny)
-                    if m["awake"] and (nx, ny) in self.visible and (best is None or d < best[1]):
+                    if m["awake"] and self.can_see(m) and (best is None or d < best[1]):
                         best = (m, d)
                     break
                 x, y = nx, ny
@@ -1333,7 +1472,7 @@ class Game:
         else:
             self.hx, self.hy = step
             t = self._trap_at(*step)
-            if t:
+            if t and not self.levitating:  # 浮遊中は罠を踏まない (move.c)
                 self._spring(t)
 
     def step(self, action):
@@ -1347,7 +1486,13 @@ class Game:
         else:
             if self._act(action) or self._fell:
                 self._fell = False
+                self._extra_move = False
                 return  # 階を降りた (階段か落とし穴)
+            if self.hasted and not self._extra_move:  # 加速: 勇者はもう 1 手動ける。モンスターと空腹はそのあと (command.c の ntimes)
+                self._extra_move = True
+                self._look()
+                return
+        self._extra_move = False
         if self.confused:
             self.confused -= 1
         self._look()
@@ -1357,6 +1502,7 @@ class Game:
             self._stomach()
             self._wanderer()
             self._ring_turn()
+            self._run_fuses()
 
     def _act(self, action):
         mons = self.visible_monsters()
@@ -1385,6 +1531,12 @@ class Game:
             kind = "restore strength" if restore else "gain strength"
             self.say(f"{self.label(kind)}を飲んだ")
             self._quaff(kind)
+        elif action in ("quaff_haste", "quaff_raise", "quaff_see_invisible", "quaff_detect_monsters", "quaff_detect_magic"):
+            kind = {"quaff_haste": "haste self", "quaff_raise": "raise level", "quaff_see_invisible": "see invisible",
+                    "quaff_detect_monsters": "monster detection", "quaff_detect_magic": "magic detection"}[action]
+            if self.has_potion(kind):
+                self.say(f"{self.label(kind)}を飲んだ")
+                self._quaff(kind)
         elif action == "quaff_unknown" and self.unknown_potions():
             kind = self._unknown_pick(self.unknown_potions())
             self.say(f"{self.label(kind)}を飲んでみた")
@@ -1457,6 +1609,12 @@ class Game:
                 return True
             self._move_to(self._step_toward(self.stairs))
 
+        self._pick_up_here()
+        return False
+
+    def _pick_up_here(self):
+        if self.levitating:
+            return
         for it in [i for i in self.items if (i["x"], i["y"]) == (self.hx, self.hy)]:
             self.items.remove(it)
             if it["kind"] == "scroll" and it["name"] == "scare monster" and it.get("found"):
@@ -1499,7 +1657,6 @@ class Game:
             else:
                 self.gear.append(it)
                 self.say(f"{it['name']} を拾った")
-        return False
 
     def _flee(self, mons):
         if not mons:
@@ -1523,14 +1680,14 @@ class Game:
             seen = (m["x"], m["y"]) in self.visible
             if not m["awake"]:
                 # 意地悪 (mean) な相手は、見かけるたびに 2/3 で襲ってくる。強欲 (greedy) も目を覚ます
-                if seen and (("M" in m["flags"] and self.rnd(3) != 0 and not self.wearing("stealth")) or "G" in m["flags"]):
+                if seen and (("M" in m["flags"] and self.rnd(3) != 0 and not self.wearing("stealth") and not self.levitating) or "G" in m["flags"]):
                     m["awake"] = True
                 continue
             if m.get("slow") and self.turn % 2 == 1:  # 鈍足の杖: 1 ターンおきにしか動けない
                 continue
             if m.get("held"):  # 拘束の巻物: 殴られるか怪物寄せまで動かない
                 continue
-            if m["ch"] == "M" and seen and not m["gazed"]:
+            if m["ch"] == "M" and seen and not m["gazed"] and not self.blind and not self.hallucinating:
                 r = self.room_at(self.hx, self.hy)
                 if (r and not r["dark"]) or self.dist(m["x"], m["y"]) < LAMP_DIST:
                     m["gazed"] = True
