@@ -16,14 +16,15 @@
 
 方針役を付けても成績はまだ変わらない。ただ介入の理由が画面に出るので、見た目はいい感じになった。次に何をするかは未定。
 
-## 使い方
+## 遊び方
 
 ```
 uv sync
 uv run learn.py 16 1200
-uv run train.py 16 gen19 30
+uv run train.py 16 gen21 30
 uv run server.py          # http://127.0.0.1:8766/
-uv run sim.py 16 8000 random rules diver table:16 laya:gen19
+uv run server.py --llm    # 方針役つき (Claude Code の claude -p を呼ぶので、ログイン済みの Claude Code が要る)
+uv run sim.py 16 8000 random rules diver table:16 laya:gen21
 ```
 
 Python 3.12 / uv / CUDA 対応 GPU。
