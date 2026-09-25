@@ -56,6 +56,7 @@
   .cell { display: flex; flex-direction: column-reverse; padding: 2px 0; border-top: 1px dotted var(--faint); }
   .cell .v { color: var(--accent); font-size: 20px; line-height: 1.2; }
   .cell .v.small { font-size: 13px; line-height: 1.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cell.wide { grid-column: span 2; }
   .cell .k { color: var(--dim); font-size: 14px; }
 
   #state { color: #a3987a; min-height: 46px; margin-bottom: 6px; }
@@ -146,10 +147,11 @@
         <div class="cell"><div class="v" id="scrolls">0</div><div class="k">巻物</div></div>
         <div class="cell"><div class="v" id="unkp">0</div><div class="k">未識別の薬</div></div>
         <div class="cell"><div class="v" id="unks">0</div><div class="k">未識別の巻物</div></div>
-        <div class="cell"><div class="v" id="wands">0</div><div class="k">杖 (残り回数)</div></div>
+        <div class="cell"><div class="v" id="wands">0</div><div class="k">杖の回数</div></div>
         <div class="cell"><div class="v" id="unkw">0</div><div class="k">未識別の杖</div></div>
         <div class="cell"><div class="v small" id="rings">–</div><div class="k">指輪 (着用)</div></div>
-        <div class="cell"><div class="v" id="ringBag">0</div><div class="k">指輪 (持ち物)</div></div>
+        <div class="cell"><div class="v" id="ringBag">0</div><div class="k">指輪 (袋)</div></div>
+        <div class="cell wide"><div class="v small" id="status">–</div><div class="k">状態</div></div>
       </div>
     </fieldset>
     <fieldset>
@@ -249,7 +251,7 @@ ws.onmessage = ev => {
 // ---------------------------------------------------------------- controls
 let paused = false;
 const TRIGGER_JP = { floor: "階に到着", hp: "体力低下", hunger: "空腹", danger: "強敵", gear: "良い装備", stuck: "足踏み", periodic: "見回り" };
-const FETCH_JP = { armor: "防具", weapon: "武器", food: "食料", potion: "薬", scroll: "巻物", wand: "杖", gold: "金貨" };
+const FETCH_JP = { armor: "防具", weapon: "武器", food: "食料", potion: "薬", scroll: "巻物", wand: "杖", gold: "金貨", ring: "指輪", magic: "魔法の品" };
 const PLAN_JP = { explore_fully: "この階を探索し切る", descend_asap: "階段を見つけ次第降りる", free: "おまかせ" };
 const TACTIC_JP = { fight: "戦え", flee: "逃げろ", escape: "階段で離脱" };
 let adviser = null;
@@ -377,7 +379,7 @@ setInterval(() => {                       // パネルは 10Hz。毎フレーム
   if (stats.ms.length) { const s = [...stats.ms].sort((a, b) => a - b); $("ms").textContent = `${s[s.length >> 1].toFixed(1)} ms`; }
   const m = pendingPanel; if (!m) return; pendingPanel = null;
   const h = m.hero, f = h.hp / h.max_hp;
-  $("depth").textContent = `B${h.depth}F`;
+  $("depth").textContent = `B${h.depth}F` + (h.amulet ? " ✦魔除けを持って帰還中" : "");
   $("hp").style.width = f * 100 + "%"; $("hpbar").style.setProperty("--c", f <= .25 ? "var(--bad)" : f <= .5 ? "var(--warn)" : "var(--ok)");
   $("hpv").textContent = `${h.hp}/${h.max_hp}`; $("lv").textContent = h.level; $("pot").textContent = h.heal;
   $("str").textContent = h.str < h.max_str ? `${h.str}/${h.max_str}` : h.str; $("ac").textContent = h.ac;
@@ -389,6 +391,7 @@ setInterval(() => {                       // パネルは 10Hz。毎フレーム
   $("unkp").textContent = h.unknown_potions ?? 0; $("unks").textContent = h.unknown_scrolls ?? 0;
   $("wands").textContent = h.wands ?? 0; $("unkw").textContent = h.unknown_wands ?? 0;
   $("rings").textContent = (h.rings ?? []).length ? h.rings.join(" / ") : "–"; $("ringBag").textContent = h.ring_bag ?? 0;
+  $("status").textContent = (h.status ?? []).length ? h.status.join("・") : "–"; $("status").style.color = (h.status ?? []).length ? "var(--warn)" : "";
   const sc = scoreOf(h);
   if (sc > hiscore) { hiscore = sc; try { localStorage.setItem("laya-rogue-hiscore", hiscore); } catch {} }
   $("score").textContent = sc; $("hiscore").textContent = hiscore;

@@ -202,7 +202,7 @@ def describe(g, valid):
         parts.append(f"Monsters sensed elsewhere on this level: {count_word(len(sensed))}"
                      + (f" (nearest: {monster_name(g, sensed[0])}, {dist_word(g.dist(sensed[0]['x'], sensed[0]['y']))})." if sensed else "."))
     parts.append(f"Items: {', '.join(item_word(g, i) for i in items[:3])}." if items else "Items: none.")
-    parts.append("Stairs: " + ("known." if "descend" in valid else "not found."))
+    parts.append("Stairs: " + ("known." if g.stairs_known() else "not found."))  # 浮遊中や道が繋がっていないときも「分かっている」は本当
     if g.rules.amulet:
         parts.append("Amulet: " + ("carried (climb back to the surface)." if g.amulet else "not found (it lies on level 26 or deeper)."))
     if g.pack_full():
@@ -325,6 +325,21 @@ class RandomBrain:
         return {"action": a, "probs": {a: 1.0}, "state": "", "ms": 0.0}
 
 
+CROWD, CROWD_TURNS = 3, 10   # 40 ターンだと逃げすぎて 500 シードで 0.3 階損した
+
+
+def crowd_escape(brain, g, awake, valid):
+    """起きた敵が CROWD 体以上見えたら (宝物部屋の入り口)、その階では CROWD_TURNS ターンのあいだ階段へ向かう (なければ逃げる)。
+    見えた瞬間だけ反応すると「1 歩離れて見えなくなる → 探索で戻る」の往復になるので、覚えておく。動かないハエトリグサは数えない。"""
+    movers = [m for m in awake if m["ch"] != "F"]
+    alert = getattr(brain, "crowd_alert", None)
+    if len(movers) >= CROWD and not any(g._adjacent(m) for m in movers):
+        brain.crowd_alert = alert = (id(g), g.depth, g.turn + CROWD_TURNS)
+    if alert is None or alert[0] != id(g) or alert[1] != g.depth or g.turn >= alert[2]:
+        return None
+    return "descend" if "descend" in valid else "flee" if "flee" in valid else None
+
+
 class RuleBrain:
     """人間が書いた if 文。学習には一切使わない、成績の物差し。"""
 
@@ -336,6 +351,8 @@ class RuleBrain:
         awake = [m for m in mons if active(m)]
         hp = hp_word(g)
         hurt = hp in ("low", "critical")
+        zt = g._zap_target()
+        zap_awake = zt is not None and zt[0]["awake"]  # 杖は起きた標的にだけ (眠った敵にも撃てるが、物差しは使わない)
         deadly = any(threat_word(g, m) == "deadly" for m in awake)
         a = None
         if hurt and "quaff_heal" in valid:
@@ -352,25 +369,25 @@ class RuleBrain:
             a = "read_hold"
         elif deadly and "read_confuse" in valid:
             a = "read_confuse"
-        elif deadly and "zap_away" in valid:
+        elif deadly and zap_awake and "zap_away" in valid:
             a = "zap_away"
-        elif deadly and "zap_slow" in valid:
+        elif deadly and zap_awake and "zap_slow" in valid:
             a = "zap_slow"
-        elif deadly and "zap_cancel" in valid and any(m["ch"] in SPECIAL or m["ch"] == "D" for m in awake):
+        elif deadly and zap_awake and "zap_cancel" in valid and any(m["ch"] in SPECIAL or m["ch"] == "D" for m in awake):
             a = "zap_cancel"
-        elif (deadly or hurt) and "zap_bolt" in valid:
+        elif (deadly or hurt) and zap_awake and "zap_bolt" in valid:
             a = "zap_bolt"
-        elif (deadly or hurt) and "zap_missile" in valid:
+        elif (deadly or hurt) and zap_awake and "zap_missile" in valid:
             a = "zap_missile"
-        elif deadly and "zap_polymorph" in valid:
+        elif deadly and zap_awake and "zap_polymorph" in valid:
             a = "zap_polymorph"
-        elif deadly and "zap_unknown" in valid:
+        elif deadly and zap_awake and "zap_unknown" in valid:
             a = "zap_unknown"
         elif awake and "wield_melee" in valid and any(g._adjacent(m) for m in awake):
             a = "wield_melee"
-        elif "wield_bow" in valid and not any(g._adjacent(m) for m in awake) and g.missiles.get("arrow", 0) >= 3:
-            a = "wield_bow"
-        elif not awake and "wield_melee" in valid:
+        elif "wield_bow" in valid and not any(g._adjacent(m) for m in awake) and g.missiles.get("arrow", 0) >= 3 and g._throw_target()[1] >= 3:
+            a = "wield_bow"  # 距離 2 では構えた次のターンに隣に来て 1 本も射れない
+        elif "wield_melee" in valid and not awake and "throw" not in valid:  # 起きた敵が消えたら戻す。拘束した敵が直線上にいるあいだは構えたまま射る (戻す↔構えるの往復を防ぐ)
             a = "wield_melee"
         elif "quaff_str" in valid and not awake:
             a = "quaff_str"
@@ -384,6 +401,8 @@ class RuleBrain:
             a = "read_food"
         elif g.hunger_word() != "fine" and not g.food and "remove_ring" in valid:  # 食料がないのに指輪で空腹が進む
             a = "remove_ring"
+        elif g.hunger_word() != "fine" and not g.food and not awake and "descend" in valid:  # 食料がないなら階を探し尽くすより次の階 (餓死 27/500)
+            a = "descend"
         elif not mons and "read_remove_curse" in valid:
             a = "read_remove_curse"
         elif not mons and "remove_ring" in valid and g.ring_useless(g._ring_to_remove()):
@@ -402,6 +421,8 @@ class RuleBrain:
             a = "quaff_unknown"
         elif not mons and "read_unknown" in valid:
             a = "read_unknown"
+        elif (crowd := crowd_escape(self, g, awake, valid)):  # 起きた敵が 3 体以上 (宝物部屋) なら、しばらく階段へ・逃げる
+            a = crowd
         elif "attack" in valid and any((m["awake"] or "M" in m["flags"]) and g._adjacent(m) for m in mons):
             a = "flee" if hp == "critical" and "flee" in valid and "quaff_heal" not in valid and deadly else "attack"
         elif "throw" in valid:
@@ -430,6 +451,8 @@ class DiverBrain:
         awake = [m for m in mons if active(m)]
         hp = hp_word(g)
         hurt = hp in ("low", "critical")
+        zt = g._zap_target()
+        zap_awake = zt is not None and zt[0]["awake"]  # 杖は起きた標的にだけ (眠った敵にも撃てるが、物差しは使わない)
         if hurt and "quaff_heal" in valid:
             a = "quaff_heal"
         elif hp == "critical" and "read_teleport" in valid and any(threat_word(g, m) == "deadly" for m in awake):
@@ -444,25 +467,25 @@ class DiverBrain:
             a = "read_hold"
         elif any(threat_word(g, m) == "deadly" for m in awake) and "read_confuse" in valid:
             a = "read_confuse"
-        elif any(threat_word(g, m) == "deadly" for m in awake) and "zap_away" in valid:
+        elif any(threat_word(g, m) == "deadly" for m in awake) and zap_awake and "zap_away" in valid:
             a = "zap_away"
-        elif any(threat_word(g, m) == "deadly" for m in awake) and "zap_slow" in valid:
+        elif any(threat_word(g, m) == "deadly" for m in awake) and zap_awake and "zap_slow" in valid:
             a = "zap_slow"
-        elif any(threat_word(g, m) == "deadly" for m in awake) and "zap_cancel" in valid and any(m["ch"] in SPECIAL or m["ch"] == "D" for m in awake):
+        elif any(threat_word(g, m) == "deadly" for m in awake) and zap_awake and "zap_cancel" in valid and any(m["ch"] in SPECIAL or m["ch"] == "D" for m in awake):
             a = "zap_cancel"
-        elif (hurt or any(threat_word(g, m) == "deadly" for m in awake)) and "zap_bolt" in valid:
+        elif (hurt or any(threat_word(g, m) == "deadly" for m in awake)) and zap_awake and "zap_bolt" in valid:
             a = "zap_bolt"
-        elif (hurt or any(threat_word(g, m) == "deadly" for m in awake)) and "zap_missile" in valid:
+        elif (hurt or any(threat_word(g, m) == "deadly" for m in awake)) and zap_awake and "zap_missile" in valid:
             a = "zap_missile"
-        elif any(threat_word(g, m) == "deadly" for m in awake) and "zap_polymorph" in valid:
+        elif any(threat_word(g, m) == "deadly" for m in awake) and zap_awake and "zap_polymorph" in valid:
             a = "zap_polymorph"
-        elif any(threat_word(g, m) == "deadly" for m in awake) and "zap_unknown" in valid:
+        elif any(threat_word(g, m) == "deadly" for m in awake) and zap_awake and "zap_unknown" in valid:
             a = "zap_unknown"
         elif awake and "wield_melee" in valid and any(g._adjacent(m) for m in awake):
             a = "wield_melee"
-        elif "wield_bow" in valid and not any(g._adjacent(m) for m in awake) and g.missiles.get("arrow", 0) >= 3:
-            a = "wield_bow"
-        elif not awake and "wield_melee" in valid:
+        elif "wield_bow" in valid and not any(g._adjacent(m) for m in awake) and g.missiles.get("arrow", 0) >= 3 and g._throw_target()[1] >= 3:
+            a = "wield_bow"  # 距離 2 では構えた次のターンに隣に来て 1 本も射れない
+        elif "wield_melee" in valid and not awake and "throw" not in valid:  # 起きた敵が消えたら戻す。拘束した敵が直線上にいるあいだは構えたまま射る (戻す↔構えるの往復を防ぐ)
             a = "wield_melee"
         elif not awake and any(x in valid for x in ("read_enchant_armor", "read_enchant_weapon", "read_protect")):
             a = next(x for x in ("read_enchant_armor", "read_enchant_weapon", "read_protect") if x in valid)
@@ -496,6 +519,8 @@ class DiverBrain:
             a = "quaff_unknown"
         elif not mons and "read_unknown" in valid:  # 眠った敵が見えているときは読まない (怪物寄せで起こす)
             a = "read_unknown"
+        elif (crowd := crowd_escape(self, g, awake, valid)):  # 起きた敵が 3 体以上 (宝物部屋) なら、しばらく階段へ・逃げる
+            a = crowd
         elif "attack" in valid:
             a = "attack"
         elif "throw" in valid:
