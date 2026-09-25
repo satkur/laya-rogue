@@ -13,6 +13,7 @@ NORMAL は判断が生まれない運の要素 (隠し扉・隠し通路・迷�
 どの未識別の物を試すか、どの指輪を着けるかといった「どれを」はプログラムが決め、「するかしないか」が判断。
 """
 import copy
+import os
 import random
 from collections import deque
 
@@ -24,6 +25,7 @@ MAZE_W, MAZE_H = 23, 5   # 迷路部屋の大きさ (区画 26 × 8 のうち。
 PASSABLE = (FLOOR, STAIRS, PASSAGE, DOOR)
 DIRS = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
 DIRS4 = [(0, -1), (-1, 0), (1, 0), (0, 1)]
+LOOSE = os.environ.get("LAYA_LOOSE", "1") == "1"  # 加速・転移・杖 (眠った敵) を持っていれば常時選べる (2026-09-25 のユーザー回答。0 は学習の変種比較用)
 VS_POISON, VS_MAGIC = 0, 3
 LAMP_DIST = 3
 
@@ -1342,7 +1344,7 @@ class Game:
             v.append("quaff_heal")
         if self.has_str_potion():
             v.append("quaff_str")
-        if self.has_potion("haste self") and awake and not self.hasted:
+        if self.has_potion("haste self") and (awake or LOOSE) and not self.hasted:  # いつ飲むかは Laya (加速中に飲むと気絶するので、加速中は出さない)
             v.append("quaff_haste")
         if self.has_potion("raise level"):
             v.append("quaff_raise")
@@ -1354,7 +1356,7 @@ class Game:
             v.append("quaff_detect_magic")
         if self.scrolls.get("magic mapping") and "magic mapping" in self.known and not self.stairs_known():
             v.append("read_map")
-        if self.scrolls.get("teleportation") and "teleportation" in self.known and awake:
+        if self.scrolls.get("teleportation") and "teleportation" in self.known and (awake or LOOSE):  # いつ読むかは Laya
             v.append("read_teleport")
         if self.unknown_potions():
             v.append("quaff_unknown")
@@ -1441,7 +1443,7 @@ class Game:
         return best
 
     def _zap_target(self):
-        """杖の標的: 8 方向のどれかに直線上で見えている起きた敵 (隣でもよい)。いちばん近いもの。"""
+        """杖の標的: 8 方向のどれかに直線上で見えている敵 (隣でもよい)。起きた敵を先に、次に近さ (眠った敵にも撃てる。追放・変身・鈍足は眠った強敵にこそ効く)。"""
         best = None
         for dx, dy in DIRS:
             x, y = self.hx, self.hy
@@ -1452,7 +1454,7 @@ class Game:
                 m = self._monster_at(nx, ny)
                 if m:
                     d = self.dist(nx, ny)
-                    if m["awake"] and self.can_see(m) and (best is None or d < best[1]):
+                    if (m["awake"] or LOOSE) and self.can_see(m) and (best is None or (m["awake"], -d) > (best[0]["awake"], -best[1])):
                         best = (m, d)
                     break
                 x, y = nx, ny

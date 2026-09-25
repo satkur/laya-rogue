@@ -351,6 +351,8 @@ class RuleBrain:
         awake = [m for m in mons if active(m)]
         hp = hp_word(g)
         hurt = hp in ("low", "critical")
+        zt = g._zap_target()
+        zap_awake = zt is not None and zt[0]["awake"]  # 杖は起きた標的にだけ (眠った敵にも撃てるが、物差しは使わない)
         deadly = any(threat_word(g, m) == "deadly" for m in awake)
         a = None
         if hurt and "quaff_heal" in valid:
@@ -367,19 +369,19 @@ class RuleBrain:
             a = "read_hold"
         elif deadly and "read_confuse" in valid:
             a = "read_confuse"
-        elif deadly and "zap_away" in valid:
+        elif deadly and zap_awake and "zap_away" in valid:
             a = "zap_away"
-        elif deadly and "zap_slow" in valid:
+        elif deadly and zap_awake and "zap_slow" in valid:
             a = "zap_slow"
-        elif deadly and "zap_cancel" in valid and any(m["ch"] in SPECIAL or m["ch"] == "D" for m in awake):
+        elif deadly and zap_awake and "zap_cancel" in valid and any(m["ch"] in SPECIAL or m["ch"] == "D" for m in awake):
             a = "zap_cancel"
-        elif (deadly or hurt) and "zap_bolt" in valid:
+        elif (deadly or hurt) and zap_awake and "zap_bolt" in valid:
             a = "zap_bolt"
-        elif (deadly or hurt) and "zap_missile" in valid:
+        elif (deadly or hurt) and zap_awake and "zap_missile" in valid:
             a = "zap_missile"
-        elif deadly and "zap_polymorph" in valid:
+        elif deadly and zap_awake and "zap_polymorph" in valid:
             a = "zap_polymorph"
-        elif deadly and "zap_unknown" in valid:
+        elif deadly and zap_awake and "zap_unknown" in valid:
             a = "zap_unknown"
         elif awake and "wield_melee" in valid and any(g._adjacent(m) for m in awake):
             a = "wield_melee"
@@ -449,6 +451,8 @@ class DiverBrain:
         awake = [m for m in mons if active(m)]
         hp = hp_word(g)
         hurt = hp in ("low", "critical")
+        zt = g._zap_target()
+        zap_awake = zt is not None and zt[0]["awake"]  # 杖は起きた標的にだけ (眠った敵にも撃てるが、物差しは使わない)
         if hurt and "quaff_heal" in valid:
             a = "quaff_heal"
         elif hp == "critical" and "read_teleport" in valid and any(threat_word(g, m) == "deadly" for m in awake):
@@ -463,19 +467,19 @@ class DiverBrain:
             a = "read_hold"
         elif any(threat_word(g, m) == "deadly" for m in awake) and "read_confuse" in valid:
             a = "read_confuse"
-        elif any(threat_word(g, m) == "deadly" for m in awake) and "zap_away" in valid:
+        elif any(threat_word(g, m) == "deadly" for m in awake) and zap_awake and "zap_away" in valid:
             a = "zap_away"
-        elif any(threat_word(g, m) == "deadly" for m in awake) and "zap_slow" in valid:
+        elif any(threat_word(g, m) == "deadly" for m in awake) and zap_awake and "zap_slow" in valid:
             a = "zap_slow"
-        elif any(threat_word(g, m) == "deadly" for m in awake) and "zap_cancel" in valid and any(m["ch"] in SPECIAL or m["ch"] == "D" for m in awake):
+        elif any(threat_word(g, m) == "deadly" for m in awake) and zap_awake and "zap_cancel" in valid and any(m["ch"] in SPECIAL or m["ch"] == "D" for m in awake):
             a = "zap_cancel"
-        elif (hurt or any(threat_word(g, m) == "deadly" for m in awake)) and "zap_bolt" in valid:
+        elif (hurt or any(threat_word(g, m) == "deadly" for m in awake)) and zap_awake and "zap_bolt" in valid:
             a = "zap_bolt"
-        elif (hurt or any(threat_word(g, m) == "deadly" for m in awake)) and "zap_missile" in valid:
+        elif (hurt or any(threat_word(g, m) == "deadly" for m in awake)) and zap_awake and "zap_missile" in valid:
             a = "zap_missile"
-        elif any(threat_word(g, m) == "deadly" for m in awake) and "zap_polymorph" in valid:
+        elif any(threat_word(g, m) == "deadly" for m in awake) and zap_awake and "zap_polymorph" in valid:
             a = "zap_polymorph"
-        elif any(threat_word(g, m) == "deadly" for m in awake) and "zap_unknown" in valid:
+        elif any(threat_word(g, m) == "deadly" for m in awake) and zap_awake and "zap_unknown" in valid:
             a = "zap_unknown"
         elif awake and "wield_melee" in valid and any(g._adjacent(m) for m in awake):
             a = "wield_melee"

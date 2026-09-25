@@ -64,7 +64,9 @@ POOL_PER_DEPTH = 300
 WANTS = dict(depth=10, level=5, kills=0.5, gold=0.01, hp=5, heal=2.5, fed=6, gear=1.5, explored=0.02, death=50, death_per_floor=5,
              missile=0.1, scroll=0.5, wand=0.5,   # wand: 正体の分かった杖の残り 1 回ぶん
              unknown_potion=0.7, unknown_scroll=0.3, unknown_stick=1.0, unknown_ring=0.5,   # 未識別 1 つ = その種類の正体の分かった物の出現率つき平均 (知るだけでは点が動かない)
-             ring=1.0, cursed=1.5)                  # ring: 着けている正体の分かった有益な指輪 1 つ (防御・力は数値に出るので別途)。cursed: 外せない物 1 つの減点 (本当の呪い)
+             ring=1.0, cursed=1.5,                  # ring: 着けている正体の分かった有益な指輪 1 つ (防御・力は数値に出るので別途)。cursed: 外せない物 1 つの減点 (本当の呪い)
+             ring_unknown_worn=float(os.environ.get("LAYA_RING_WORN", "0.3")))  # 未識別の指輪を着けている 1 つ。0 だと着ける↔外すが同点で往復した (gen25 の表)
+USE_BASE = os.environ.get("LAYA_NO_BASE") is None   # 2 段の表 (経験の薄いキーは valid 列なしの表に戻る) の切替。変種比較用
 # fed: 腹の中 (上限 2000) と食料 (1 つ 1300、3 つまで) を合わせた「食べられる量」を 1300 = 6 点で。2026-09-25 までは腹 (1300 で頭打ち) と食料 (1 つ 3 点) が別で、
 # 満腹のあいだは指輪の空腹コストが見えず、食べると 3 点失って 1300 で頭打ちのぶんしか戻らなかった (アドバイザーの指摘)
 TACTICAL_SCROLLS = ("teleportation", "remove curse", "monster confusion", "hold monster", "scare monster", "food detection")
@@ -97,6 +99,7 @@ def score(g):
             + w["unknown_potion"] * sum(g.unknown_potions().values()) + w["unknown_scroll"] * sum(g.unknown_scrolls().values())
             + w["unknown_stick"] * len(g.unknown_sticks()) + w["unknown_ring"] * sum(g.unknown_rings().values())
             + w["wand"] * sum(c for k, c in g.known_sticks().items() if k in USEFUL_STICKS) + w["ring"] * rings - w["cursed"] * cursed
+            + w["ring_unknown_worn"] * sum(1 for r in g.worn if r["name"] not in g.known)
             + ENCHANT_VALUE * sum(g.scrolls.get(n, 0) for n in D.ENCHANT_SCROLLS if n in g.known)
             + (100 if g.won else 0) - ((w["death"] + w["death_per_floor"] * max(0, D.GOAL_DEPTH - g.depth)) if g.dead else 0))
 
@@ -125,6 +128,8 @@ def lookup(table, key, valid, base=None):
     q = table.get(key, {}).get("q")
     if q is not None and min(v[1] for v in q.values()) >= 1:
         return q
+    if not USE_BASE:
+        return None
     b = (base if base is not None else _base).get(base_key(key))
     if b:
         q = {a: b[a] for a in valid if a in b and b[a][1] >= 1}
