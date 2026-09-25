@@ -368,9 +368,9 @@ class RuleBrain:
             a = "zap_unknown"
         elif awake and "wield_melee" in valid and any(g._adjacent(m) for m in awake):
             a = "wield_melee"
-        elif "wield_bow" in valid and not any(g._adjacent(m) for m in awake) and g.missiles.get("arrow", 0) >= 3:
-            a = "wield_bow"
-        elif not awake and "wield_melee" in valid:
+        elif "wield_bow" in valid and not any(g._adjacent(m) for m in awake) and g.missiles.get("arrow", 0) >= 3 and g._throw_target()[1] >= 3:
+            a = "wield_bow"  # 距離 2 では構えた次のターンに隣に来て 1 本も射れない
+        elif "wield_melee" in valid and not awake and "throw" not in valid:  # 起きた敵が消えたら戻す。拘束した敵が直線上にいるあいだは構えたまま射る (戻す↔構えるの往復を防ぐ)
             a = "wield_melee"
         elif "quaff_str" in valid and not awake:
             a = "quaff_str"
@@ -384,6 +384,8 @@ class RuleBrain:
             a = "read_food"
         elif g.hunger_word() != "fine" and not g.food and "remove_ring" in valid:  # 食料がないのに指輪で空腹が進む
             a = "remove_ring"
+        elif g.hunger_word() != "fine" and not g.food and not awake and "descend" in valid:  # 食料がないなら階を探し尽くすより次の階 (餓死 27/500)
+            a = "descend"
         elif not mons and "read_remove_curse" in valid:
             a = "read_remove_curse"
         elif not mons and "remove_ring" in valid and g.ring_useless(g._ring_to_remove()):
@@ -402,6 +404,8 @@ class RuleBrain:
             a = "quaff_unknown"
         elif not mons and "read_unknown" in valid:
             a = "read_unknown"
+        elif len(mons) >= 3 and not any(g._adjacent(m) for m in mons) and ("descend" in valid or "flee" in valid):  # 宝物部屋 (敵が多い) には踏み込まない
+            a = "descend" if "descend" in valid else "flee"
         elif "attack" in valid and any((m["awake"] or "M" in m["flags"]) and g._adjacent(m) for m in mons):
             a = "flee" if hp == "critical" and "flee" in valid and "quaff_heal" not in valid and deadly else "attack"
         elif "throw" in valid:
@@ -460,9 +464,9 @@ class DiverBrain:
             a = "zap_unknown"
         elif awake and "wield_melee" in valid and any(g._adjacent(m) for m in awake):
             a = "wield_melee"
-        elif "wield_bow" in valid and not any(g._adjacent(m) for m in awake) and g.missiles.get("arrow", 0) >= 3:
-            a = "wield_bow"
-        elif not awake and "wield_melee" in valid:
+        elif "wield_bow" in valid and not any(g._adjacent(m) for m in awake) and g.missiles.get("arrow", 0) >= 3 and g._throw_target()[1] >= 3:
+            a = "wield_bow"  # 距離 2 では構えた次のターンに隣に来て 1 本も射れない
+        elif "wield_melee" in valid and not awake and "throw" not in valid:  # 起きた敵が消えたら戻す。拘束した敵が直線上にいるあいだは構えたまま射る (戻す↔構えるの往復を防ぐ)
             a = "wield_melee"
         elif not awake and any(x in valid for x in ("read_enchant_armor", "read_enchant_weapon", "read_protect")):
             a = next(x for x in ("read_enchant_armor", "read_enchant_weapon", "read_protect") if x in valid)
@@ -496,6 +500,8 @@ class DiverBrain:
             a = "quaff_unknown"
         elif not mons and "read_unknown" in valid:  # 眠った敵が見えているときは読まない (怪物寄せで起こす)
             a = "read_unknown"
+        elif len(mons) >= 3 and not any(g._adjacent(m) for m in mons) and ("descend" in valid or "flee" in valid):  # 宝物部屋 (敵が多い) には踏み込まない
+            a = "descend" if "descend" in valid else "flee"
         elif "attack" in valid:
             a = "attack"
         elif "throw" in valid:
