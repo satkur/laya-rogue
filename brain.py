@@ -202,7 +202,7 @@ def describe(g, valid):
         parts.append(f"Monsters sensed elsewhere on this level: {count_word(len(sensed))}"
                      + (f" (nearest: {monster_name(g, sensed[0])}, {dist_word(g.dist(sensed[0]['x'], sensed[0]['y']))})." if sensed else "."))
     parts.append(f"Items: {', '.join(item_word(g, i) for i in items[:3])}." if items else "Items: none.")
-    parts.append("Stairs: " + ("known." if "descend" in valid else "not found."))
+    parts.append("Stairs: " + ("known." if g.stairs_known() else "not found."))  # 浮遊中や道が繋がっていないときも「分かっている」は本当
     if g.rules.amulet:
         parts.append("Amulet: " + ("carried (climb back to the surface)." if g.amulet else "not found (it lies on level 26 or deeper)."))
     if g.pack_full():
@@ -325,6 +325,21 @@ class RandomBrain:
         return {"action": a, "probs": {a: 1.0}, "state": "", "ms": 0.0}
 
 
+CROWD, CROWD_TURNS = 3, 10   # 40 ターンだと逃げすぎて 500 シードで 0.3 階損した
+
+
+def crowd_escape(brain, g, awake, valid):
+    """起きた敵が CROWD 体以上見えたら (宝物部屋の入り口)、その階では CROWD_TURNS ターンのあいだ階段へ向かう (なければ逃げる)。
+    見えた瞬間だけ反応すると「1 歩離れて見えなくなる → 探索で戻る」の往復になるので、覚えておく。動かないハエトリグサは数えない。"""
+    movers = [m for m in awake if m["ch"] != "F"]
+    alert = getattr(brain, "crowd_alert", None)
+    if len(movers) >= CROWD and not any(g._adjacent(m) for m in movers):
+        brain.crowd_alert = alert = (id(g), g.depth, g.turn + CROWD_TURNS)
+    if alert is None or alert[0] != id(g) or alert[1] != g.depth or g.turn >= alert[2]:
+        return None
+    return "descend" if "descend" in valid else "flee" if "flee" in valid else None
+
+
 class RuleBrain:
     """人間が書いた if 文。学習には一切使わない、成績の物差し。"""
 
@@ -404,8 +419,8 @@ class RuleBrain:
             a = "quaff_unknown"
         elif not mons and "read_unknown" in valid:
             a = "read_unknown"
-        elif len(mons) >= 3 and not any(g._adjacent(m) for m in mons) and ("descend" in valid or "flee" in valid):  # 宝物部屋 (敵が多い) には踏み込まない
-            a = "descend" if "descend" in valid else "flee"
+        elif (crowd := crowd_escape(self, g, awake, valid)):  # 起きた敵が 3 体以上 (宝物部屋) なら、しばらく階段へ・逃げる
+            a = crowd
         elif "attack" in valid and any((m["awake"] or "M" in m["flags"]) and g._adjacent(m) for m in mons):
             a = "flee" if hp == "critical" and "flee" in valid and "quaff_heal" not in valid and deadly else "attack"
         elif "throw" in valid:
@@ -500,8 +515,8 @@ class DiverBrain:
             a = "quaff_unknown"
         elif not mons and "read_unknown" in valid:  # 眠った敵が見えているときは読まない (怪物寄せで起こす)
             a = "read_unknown"
-        elif len(mons) >= 3 and not any(g._adjacent(m) for m in mons) and ("descend" in valid or "flee" in valid):  # 宝物部屋 (敵が多い) には踏み込まない
-            a = "descend" if "descend" in valid else "flee"
+        elif (crowd := crowd_escape(self, g, awake, valid)):  # 起きた敵が 3 体以上 (宝物部屋) なら、しばらく階段へ・逃げる
+            a = crowd
         elif "attack" in valid:
             a = "attack"
         elif "throw" in valid:

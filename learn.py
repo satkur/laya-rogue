@@ -40,11 +40,13 @@ ROLLOUTS = 3        # 1 行動あたりの先読み回数
 P_EVAL = 0.05       # 通過した局面のうち、先読みで調べる割合
 P_EVAL_RARE = 0.5   # 稀な判断 (薬・巻物を使う、危険な場面で未識別を試す) が選べる局面は、この割合で調べる。
                     # 5% のままだと経験表の重みが 4 に届かず、回復薬や転移の使い方を判断ヘッドに教えていなかった (NOTES.md 11 章)
-RARE_ACTIONS = {"quaff_heal", "quaff_str", "read_map", "read_teleport", "read_identify", "zap_bolt", "zap_missile", "zap_slow", "zap_away",
-                "zap_polymorph", "zap_drain", "zap_cancel", "zap_light", "zap_unknown", "wield_bow", "wield_melee",
-                "read_enchant_armor", "read_enchant_weapon", "read_protect",
-                "read_remove_curse", "put_on_ring", "remove_ring", "read_confuse", "read_hold", "drop_scare", "read_food",
-                "quaff_haste", "quaff_raise", "quaff_see_invisible", "quaff_detect_monsters", "quaff_detect_magic"}
+RARE_ACTIONS = {"quaff_heal", "quaff_str", "read_map", "read_teleport", "zap_bolt", "zap_missile", "zap_slow", "zap_away",
+                "zap_polymorph", "zap_drain", "zap_cancel", "zap_unknown", "wield_bow", "read_confuse", "read_hold",
+                "quaff_haste", "quaff_see_invisible"}
+# RARE は「その場面でしか選べない (敵が直線上にいる、起きた敵がいる、傷ついている)」行動だけ。持っているだけで毎ターン選べる行動
+# (識別・強化・解呪・指輪の着脱・恐怖の巻物・食料探知・探知の薬・光の杖・弓を戻す) を入れると、それを持った後は毎ターン 50% で先読みして
+# 計算が 10 倍になり、表が「持ち物がある平時」に偏る (アドバイザーの指摘、NOTES 15 章)
+COMMIT_ACTIONS = {"rest", "explore", "search", "descend", "ascend", "approach", "flee", "pick_up"}  # 続けて意味のある行動だけ COMMIT する
 MAX_TURNS = 3000
 EPSILON = 0.15      # 表を無視して気まぐれに動く確率 (知らない局面に出会うため)
 DECAY = 0.5         # ラウンドをまたぐとき、古い経験の重みをこれだけ残す
@@ -59,13 +61,16 @@ POOL_PER_DEPTH = 300
 # 点にしない (持つことに点を付けると読むと損になり、1 回目の学習で地図を読む率が 1〜2% になった)
 # 未識別の薬・巻物は 1 つ 0.5 (拾う価値はあるが、正体の分かった回復薬 2.5 より低い。試して当たれば得、外れれば損は効果そのものから)
 # 死の減点は残りの階数に比例して増やす (浅い階で死ぬほど失うものが大きい)。50 固定だと「1 階のために 15% の死亡リスクを取る」のが最適になっていた
-WANTS = dict(depth=10, level=5, kills=0.5, gold=0.01, hp=5, heal=2.5, food=3, fed=6, gear=1.5, explored=0.02, death=50, death_per_floor=5,
-             missile=0.1, scroll=0.5, unknown=0.5, wand=0.5,   # wand: 正体の分かった杖の残り 1 回ぶん。未識別の杖は 1 本 unknown
-             ring=1.0, cursed=1.5)                              # ring: 着けている正体の分かった有益な指輪 1 つ (防御・力は数値に出るので別途)。cursed: 外せない物 1 つの減点
+WANTS = dict(depth=10, level=5, kills=0.5, gold=0.01, hp=5, heal=2.5, fed=6, gear=1.5, explored=0.02, death=50, death_per_floor=5,
+             missile=0.1, scroll=0.5, wand=0.5,   # wand: 正体の分かった杖の残り 1 回ぶん
+             unknown_potion=0.7, unknown_scroll=0.3, unknown_stick=1.0, unknown_ring=0.5,   # 未識別 1 つ = その種類の正体の分かった物の出現率つき平均 (知るだけでは点が動かない)
+             ring=1.0, cursed=1.5)                  # ring: 着けている正体の分かった有益な指輪 1 つ (防御・力は数値に出るので別途)。cursed: 外せない物 1 つの減点 (本当の呪い)
+# fed: 腹の中 (上限 2000) と食料 (1 つ 1300、3 つまで) を合わせた「食べられる量」を 1300 = 6 点で。2026-09-25 までは腹 (1300 で頭打ち) と食料 (1 つ 3 点) が別で、
+# 満腹のあいだは指輪の空腹コストが見えず、食べると 3 点失って 1300 で頭打ちのぶんしか戻らなかった (アドバイザーの指摘)
 TACTICAL_SCROLLS = ("teleportation", "remove curse", "monster confusion", "hold monster", "scare monster", "food detection")
-ENCHANT_VALUE = 1.0   # 正体の分かった強化・保護の巻物 1 枚 (読めば装備の点になる。持っているだけより読む方が得になる値)
+ENCHANT_VALUE = 0.5   # 正体の分かった強化・保護の巻物 1 枚。読めば装備の点 (鎧 +1.5、武器 +0.75〜1.5) になるので、持っているより読む方が得
 USEFUL_STICKS = {"lightning", "fire", "cold", "magic missile", "slow monster", "teleport away", "polymorph", "drain life", "cancellation"}
-TACTICAL_POTIONS = {"haste self": 1.5, "raise level": 2.0, "see invisible": 0.5, "monster detection": 0.5, "magic detection": 0.5}   # 1 本の価値
+TACTICAL_POTIONS = {"haste self": 1.5, "raise level": 2.0, "see invisible": 0.1, "monster detection": 0.1, "magic detection": 0.1}   # 1 本の価値。探知は飲んでも点にならないので低く
 
 
 def hp_value(f):
@@ -80,16 +85,18 @@ def score(g):
     mw = g.melee_weapon()
     gear = ((10 - g.ac()) + (1 if g.armor.get("protected") else 0) + avg_dice(mw["dice"]) + mw["dplus"] + 0.5 * mw["hplus"])
     rings = sum(1 for r in g.worn if r["name"] in g.known and not g.ring_useless(r) and r["name"] not in ("protection", "add strength"))
+    cursed = sum(1 for r in g.worn if r["cursed"]) + sum(1 for x in (g.armor, g.weapon) if x.get("cursed"))  # 本当の呪い (分かった瞬間に減点が付くと、試した行動が罰を受ける)
+    eatable = min(g.food_left, D.STOMACH_SIZE) + D.HUNGER_TIME * min(g.food, 3)
     progress = g.max_depth + (g.max_depth - g.depth if g.amulet else 0)  # 魔除けを持って上るぶんも進み (HARD / ORIGINAL)
     return (w["depth"] * progress + w["level"] * g.level + w["kills"] * g.kills + w["gold"] * g.gold
-            + w["hp"] * hp_value(g.hp / max(1, g.max_hp)) + w["heal"] * g.has_heal() + w["food"] * min(g.food, 3)
-            + w["fed"] * max(0, min(g.food_left, 1300)) / 1300 + w["gear"] * gear + 1.5 * g.str
+            + w["hp"] * hp_value(g.hp / max(1, g.max_hp)) + w["heal"] * g.has_heal()
+            + w["fed"] * max(0, eatable) / D.HUNGER_TIME + w["gear"] * gear + 1.5 * g.str
             + w["explored"] * g.explored + w["missile"] * min(30, sum(g.missiles.values()))
             + w["scroll"] * sum(g.scrolls.get(n, 0) for n in TACTICAL_SCROLLS if n in g.known)
             + sum(v * g.has_potion(n) for n, v in TACTICAL_POTIONS.items())
-            + w["unknown"] * (sum(g.unknown_potions().values()) + sum(g.unknown_scrolls().values()) + len(g.unknown_sticks())
-                              + sum(g.unknown_rings().values()))
-            + w["wand"] * sum(c for k, c in g.known_sticks().items() if k in USEFUL_STICKS) + w["ring"] * rings - w["cursed"] * len(g.cursed_worn())
+            + w["unknown_potion"] * sum(g.unknown_potions().values()) + w["unknown_scroll"] * sum(g.unknown_scrolls().values())
+            + w["unknown_stick"] * len(g.unknown_sticks()) + w["unknown_ring"] * sum(g.unknown_rings().values())
+            + w["wand"] * sum(c for k, c in g.known_sticks().items() if k in USEFUL_STICKS) + w["ring"] * rings - w["cursed"] * cursed
             + ENCHANT_VALUE * sum(g.scrolls.get(n, 0) for n in D.ENCHANT_SCROLLS if n in g.known)
             + (100 if g.won else 0) - ((w["death"] + w["death_per_floor"] * max(0, D.GOAL_DEPTH - g.depth)) if g.dead else 0))
 
@@ -97,21 +104,52 @@ def score(g):
 TEXTS_PER_KEY = 24  # 粗いキー 1 つにつき、Laya の教材として控えておく状況文の数
 
 
-def pick(table, key, valid, rng, temp, eps):
+def base_key(key):
+    """キーから valid の列を外したもの。45 行動になってキーが valid の組み合わせで割れるので、経験の薄いキーはこの粗さの表に戻る (2 段の表)。"""
+    return key.rsplit("|", 1)[0]
+
+
+def build_base(table):
+    """valid 列を外したキーごとに、行動の評価を重みつきで平均した表。ラウンドの始めに作って先読みの中で使う。"""
+    base = {}
+    for key, entry in table.items():
+        b = base.setdefault(base_key(key), {})
+        for a, (mean, w) in entry["q"].items():
+            m0, w0 = b.get(a, (0.0, 0.0))
+            b[a] = ((m0 * w0 + mean * w) / (w0 + w), w0 + w) if w0 + w > 0 else (0.0, 0.0)
+    return base
+
+
+def lookup(table, key, valid, base=None):
+    """キーの評価。経験が 1 に満たなければ valid 列を外した表で代用 (valid の行動だけ)。それもなければ None。"""
     q = table.get(key, {}).get("q")
+    if q is not None and min(v[1] for v in q.values()) >= 1:
+        return q
+    b = (base if base is not None else _base).get(base_key(key))
+    if b:
+        q = {a: b[a] for a in valid if a in b and b[a][1] >= 1}
+        if q:
+            return q
+    return None
+
+
+def pick(table, key, valid, rng, temp, eps):
+    q = lookup(table, key, valid)
     if q is None or rng.random() < eps:
         return rng.choice(valid)
-    vals = [q[a][0] for a in valid]
+    acts = [a for a in valid if a in q]
+    vals = [q[a][0] for a in acts]
     top = max(vals)
     weights = [math.exp((v - top) / temp) for v in vals]
-    return rng.choices(valid, weights)[0]
+    return rng.choices(acts, weights)[0]
 
 
-def value(table, key, valid):
+def value(table, key, valid, base=None):
     """その状況から先の見込み。表の評価を、先読みの中と同じ選び方で平均する。経験がほとんどない状況は None。"""
-    q = table.get(key, {}).get("q")
-    if q is None or min(v[1] for v in q.values()) < 1:
+    q = lookup(table, key, valid, base)
+    if q is None:
         return None
+    valid = [a for a in valid if a in q]
     vals = [q[a][0] for a in valid]
     top = max(vals)
     weights = [math.exp((v - top) / ROLL_TEMP) for v in vals]
@@ -124,7 +162,7 @@ def rollout(g, action, table, v_default, seed):
     before = score(sim)
     key0 = coarse_key(sim, sim.valid_actions())
     sim.step(action)
-    committed = 1
+    committed = 1 if action in COMMIT_ACTIONS else 0  # 薬・巻物・杖などは 1 回だけ (続けると「持っている分をまとめて使う」値になる)
     for _ in range(HORIZON - 1):
         if sim.over:
             break
@@ -144,12 +182,12 @@ def rollout(g, action, table, v_default, seed):
     return ret
 
 
-_table, _v_default = {}, 0.0
+_table, _v_default, _base = {}, 0.0, {}
 
 
-def _init(table, v_default):
-    global _table, _v_default
-    _table, _v_default = table, v_default
+def _init(table, v_default, base):
+    global _table, _v_default, _base
+    _table, _v_default, _base = table, v_default, base
 
 
 def episode(args):
@@ -210,14 +248,15 @@ def main():
             for v in entry["q"].values():
                 v[1] *= DECAY
         # 表にない (経験がほとんどない) 状況の見込みは、表全体の平均で代用する。0 にすると未知の状況を不当に避けてしまう
-        known = [(value(table, k, list(e["q"])), min(v[1] for v in e["q"].values())) for k, e in table.items()]
+        base = build_base(table)
+        known = [(value(table, k, list(e["q"]), base), min(v[1] for v in e["q"].values())) for k, e in table.items()]
         known = [(v, w) for v, w in known if v is not None]
         v_default = sum(v * w for v, w in known) / sum(w for _, w in known) if known else 0.0
         jobs = []
         for i in range(episodes):
             start = rng.choice(pool[rng.choice(list(pool))]) if pool and rng.random() < P_CONTINUE else None
             jobs.append((r * 1_000_003 + i, start, difficulty))
-        with ProcessPoolExecutor(max_workers=max(1, (os.cpu_count() or 4) - 2), initializer=_init, initargs=(table, v_default)) as pool_exec:
+        with ProcessPoolExecutor(max_workers=max(1, (os.cpu_count() or 4) - 2), initializer=_init, initargs=(table, v_default, base)) as pool_exec:
             results = list(pool_exec.map(episode, jobs, chunksize=2))
         n_eval, fresh_depths, deepest = 0, [], 0
         for samples, arrivals, depth, dead, fresh in results:
@@ -243,7 +282,8 @@ def main():
                     bucket[rng.randrange(POOL_PER_DEPTH)] = h
         (DATA / f"table_r{r}.json").write_text(json.dumps(table, ensure_ascii=False), encoding="utf-8")
         print(f"round {r}: 1 階から始めた回の平均到達階 {sum(fresh_depths) / max(1, len(fresh_depths)):.2f} | 全体の最深 {deepest} | "
-              f"控えのある深さ {max(pool) if pool else 1} | 調べた局面 {n_eval} | 表の状況数 {len(table)} | 見込みの平均 {v_default:.1f} | {time.perf_counter() - t0:.0f}s", flush=True)
+              f"控えのある深さ {max(pool) if pool else 1} | 調べた局面 {n_eval} | 表の状況数 {len(table)} (valid 列なしで {len(set(map(base_key, table)))}、"
+              f"重み 4 以上 {sum(min(v[1] for v in e['q'].values()) >= 4 for e in table.values())}) | 見込みの平均 {v_default:.1f} | {time.perf_counter() - t0:.0f}s", flush=True)
 
 
 if __name__ == "__main__":

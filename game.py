@@ -23,6 +23,7 @@ ROCK, FLOOR, STAIRS, PASSAGE, DOOR, RWALL, SDOOR, SPASS = 0, 1, 2, 3, 4, 5, 6, 7
 MAZE_W, MAZE_H = 23, 5   # 迷路部屋の大きさ (区画 26 × 8 のうち。奇数にして 2 マス刻みの格子を掘る)
 PASSABLE = (FLOOR, STAIRS, PASSAGE, DOOR)
 DIRS = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+DIRS4 = [(0, -1), (-1, 0), (1, 0), (0, 1)]
 VS_POISON, VS_MAGIC = 0, 3
 LAMP_DIST = 3
 
@@ -249,7 +250,8 @@ class Game:
                 if self.rules.hidden_doors and self.tiles[y][x] == DOOR and self.rnd(10) + 1 < self.depth and self.rnd(5) == 0:
                     self.tiles[y][x] = SDOOR
                 elif (self.rules.hidden_passages and self.tiles[y][x] == PASSAGE and self.rnd(10) + 1 < self.depth and self.rnd(40) == 0
-                      and not (r := self.room_at(x, y))):  # 迷路と欠けた部屋の中は隠さない (捜索の巡回が迷路の袋小路を探さないため)
+                      and not self.room_at(x, y) and not any((rm := self.room_at(x + dx, y + dy)) and rm.get("maze") for dx, dy in DIRS4)):
+                    # 迷路と欠けた部屋の中と、迷路に接するマスは隠さない (捜索の巡回が迷路の袋小路を探さないため。ORIGINAL 種 5080 の 16 階で行き詰まった)
                     self.tiles[y][x] = SPASS
         self._populate()
 
@@ -1803,6 +1805,7 @@ class Game:
         """勇者が action を実行し、続けて全モンスターが動き、空腹と自然回復が進む。"""
         self.turn += 1
         self._dist = None
+        self._pos0 = (self.hx, self.hy)  # このターンの始めの位置 (動かずに足元の恐怖の巻物を拾わないため)
         if self.no_move > 0:
             self.no_move -= 1
         if self.no_command > 0:
@@ -2025,6 +2028,9 @@ class Game:
                 continue
             self.items.remove(it)
             if it["kind"] == "scroll" and it["name"] == "scare monster" and it.get("found"):
+                if (self.hx, self.hy) == getattr(self, "_pos0", None):  # 自分で置いた巻物の上に留まっている (動いて踏んだときだけ拾って塵になる)
+                    self.items.append(it)
+                    continue
                 self.say("拾おうとした巻物は塵になった")
                 continue
             if it["kind"] == "amulet":
