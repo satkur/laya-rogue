@@ -25,11 +25,12 @@ heal_now (次の手で回復薬)。指示文には実測の事実 (死因の内�
 import json
 import math
 import os
+import random
 import subprocess
 import time
 
 import rogue_data as D
-from brain import SPECIAL, dist_word, hp_word, pace_word, threat_word
+from brain import SPECIAL, choose, dist_word, hp_word, pace_word, threat_word
 from game import active
 
 DEFAULT_MODEL = "claude-sonnet-5"   # 方針役の既定 (2026-09-24 に Sonnet 5 へ。Opus は過剰。claude -p の --model に渡す)
@@ -446,8 +447,22 @@ class Guided:
             st.reset()
         trigger = st.check(g)
         advice = st.consult(g, trigger) if trigger else None
-        valid = g.valid_actions()
-        d = self.brain.decide(Masked(g, st.allowed(g, valid)))
-        st.recent = (st.recent + [d["action"]])[-40:]
+        d = decide_within(self.brain, g, st)
         d["advice"] = advice
         return d
+
+
+def decide_within(brain, g, st):
+    """The pilot's decision under the strategist's constraints. The pilot sees all its options and, when its pick is not
+    allowed, the action is re-drawn from its own distribution over the allowed ones. Hiding options (Masked) showed the
+    pilot option sets it never trained on: with "flee" hidden, Laya rested next to the enemy (NOTES 15)."""
+    allowed = st.allowed(g, g.valid_actions())
+    d = brain.decide(g)
+    if d["action"] not in allowed:
+        probs = {a: p for a, p in d["probs"].items() if a in allowed and p > 0}
+        if probs:
+            d["action"] = choose(probs, getattr(brain, "sharpness", None), getattr(g, "action_rng", random))
+        else:  # a one-hot brain (rules / diver): ask it again with only the allowed options
+            d = brain.decide(Masked(g, allowed))
+    st.recent = (st.recent + [d["action"]])[-40:]
+    return d

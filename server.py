@@ -28,7 +28,7 @@ from brain import WEIGHTS, LayaBrain
 from game import H, ROCK, RWALL, SDOOR, SPASS, W, Game
 import strategist as strategist_mod
 from sim import standard_hero
-from strategist import DEFAULT_MODEL, Masked, Strategist
+from strategist import DEFAULT_MODEL, Strategist, decide_within
 
 HOST, PORT = "127.0.0.1", 8766
 STATIC = Path(__file__).parent / "static"
@@ -278,8 +278,7 @@ async def ws(sock: WebSocket):
                     await sock.send_json({"type": "thinking", "kind": adviser.kind})
                     advice = await asyncio.to_thread(adviser.consult, g, trigger)
                     await sock.send_json({"type": "advice", **advice, "adviser": adviser_state()})
-                d = brain.decide(Masked(g, adviser.allowed(g, g.valid_actions())))  # 10〜30ms。ローカル単独利用なのでイベントループ上で直接呼ぶ
-                adviser.recent = (adviser.recent + [d["action"]])[-40:]
+                d = decide_within(brain, g, adviser)  # 10-30 ms, called on the event loop (single local user)
                 g.step(d["action"])
                 if g.depth != depth:
                     depth = g.depth
