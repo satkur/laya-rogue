@@ -7,7 +7,7 @@
   - 将来はこの役をプレイヤーに渡すか、プレイヤーの補助として残す
 
 呼ぶ場面:
-  floor    新しい階に着いた
+  floor    新しい階に着いた (深さに対して経験が behind / even のときだけ。ahead なら呼ばない。2026-09-26)
   hp       体力が low / critical に落ちた
   hunger   空腹になった
   danger   手強い敵 (互角以上、または特殊攻撃持ち) が起きて視界に入った
@@ -29,7 +29,7 @@ import subprocess
 import time
 
 import rogue_data as D
-from brain import SPECIAL, dist_word, hp_word, threat_word
+from brain import SPECIAL, dist_word, hp_word, pace_word, threat_word
 from game import active
 
 DEFAULT_MODEL = "claude-sonnet-5"   # 方針役の既定 (2026-09-24 に Sonnet 5 へ。Opus は過剰。claude -p の --model に渡す)
@@ -74,7 +74,7 @@ SCHEMA = {
 
 SYSTEM = f"""You are the strategist for a hero in a Rogue 5.4-style dungeon crawl. Goal: reach dungeon level {D.GOAL_DEPTH} alive.
 A small, fast model ("the pilot", trained by 20,000 games of self-play) picks the hero's action every turn. You do not pick actions. You set constraints that remove options from it, and they stay in force until the next consultation.
-You are consulted when HP or hunger worsens, when a non-trivial monster wakes up in view, when a better weapon or armor comes into view, when the hero seems stuck, and periodically while a constraint is in force (not on arrival at a new level). Each consultation costs several seconds of real time, nothing in game time.
+You are consulted on arrival at a new level when the hero's experience level is behind or even for the depth (not when it is ahead), when HP or hunger worsens, when a non-trivial monster wakes up in view, when a better weapon or armor comes into view, when the hero seems stuck, and periodically while a constraint is in force. Each consultation costs several seconds of real time, nothing in game time.
 
 Rules of this game (subset of Rogue 5.4.4):
 - Monsters get stronger with depth. The hero gets stronger by experience levels (killing monsters), better weapons/armor found on the floor, strength potions, and scrolls of enchant armor / enchant weapon / protect armor (the pilot reads them with "read_enchant_armor" / "read_enchant_weapon" / "read_protect"). One weapon in ten and one armor in five is cursed (a bad bonus, and it cannot be taken off once worn; enchant or remove curse lifts it). Dragons breathe fire (6d6 unless the hero resists) at a hero in a straight line within 6 squares.
@@ -91,7 +91,8 @@ Rules of this game (subset of Rogue 5.4.4):
 - Special attacks: aquator rusts armor (permanent, armor is what keeps the hero alive deeper down); rattlesnake poison lowers strength; wraith drains a level; vampire drains max HP; ice monster freezes; venus flytrap holds (cannot move away, must kill it); leprechaun steals gold; nymph steals a potion; medusa confuses. Sleeping monsters are hit more easily; "mean" ones (hobgoblin, troll, quagga, rattlesnake, orc...) usually wake up when they notice the hero.
 
 Your outputs:
-- plan: "explore_fully" = do not take the stairs while unexplored area remains (more items and experience, but more wandering monsters). "descend_asap" = once the stairs are known, stop exploring and picking up, take the stairs (down, or up when the hero carries the Amulet). "free" = no constraint.
+- plan: "explore_fully" = do not take the stairs while unexplored area remains (more items and experience, but more wandering monsters). "descend_asap" = once the stairs are known, stop exploring and picking up, take the stairs (down, or up when the hero carries the Amulet). "free" = no constraint. The plan stays in force across levels until you change it.
+  What this pilot does when the plan is "free": once the stairs are known and no awake enemy is in view, it takes them in about 9 cases of 10, whatever its experience level is for the depth (in its experience table, "descend" is the top choice 87% of the time even when it is behind in experience). Its training rewards depth, and its 40-turn lookahead cannot see the fights that a low-level hero loses deeper down. So on this pilot "free" means "descend as soon as the stairs are found", not "the pilot weighs exploring against descending".
 - rest: true = when no awake enemy is in view, only rest (or eat / drink / equip) until HP is at least 90%. Ignored while hungry-weak or worse.
 - tactic (only matters while an awake enemy is in view, and resets to "free" when no awake enemy is in view): "fight" = running away on foot is removed; attacking, the stairs and potions stay. "flee" = attacking and approaching are removed (only useful to reach the stairs or to stall a slow/held situation). "escape" = if the stairs are known, walk to them and go down now, ignoring the monster; if they are not known it behaves like "flee". "free" = no constraint. The stairs are never removed by a tactic.
 - heal_now: true = drink a healing potion on the next turn if the hero carries one.
@@ -104,15 +105,14 @@ Your outputs:
 - fetch: "armor" / "weapon" / "food" / "potion" / "scroll" / "wand" / "ring" / "gold" = walk to the nearest item of that kind in view and pick it up, ignoring everything else while no monster is awake in view. Cleared when it is picked up, when a monster wakes up, or after 30 turns. "none" = nothing. The pilot on its own rarely detours for items (it learned that most floor items are not worth the walk), so this is how you make it collect a specific thing, e.g. better armor. A better weapon or armor is worn automatically once carried.
 - reason: one short sentence in Japanese, shown to the player.
 
-Briefing: what was measured in this version (hundreds of games with the same pilot). Use it to calibrate, then decide for yourself.
-- The pilot alone reaches level 8-10 on average (best 17); hand-written rules reach about the same. Nobody has reached 20 yet: the wall is levels 8-13 (centaur, troll, quagga, yeti) against a hero of experience level 4-6.
-- Of 64 deaths: in 52% the killer was already rated "deadly" the first time it was seen, in 91% the stairs were not known yet, and the median time from first sight to death was 7 turns. In 56% the hero had 80%+ HP when the killer appeared. So most deaths are a fight that could not be won or escaped once it started. What a strategist can influence is the state the hero is in when the next monster appears, and whether the stairs are used as an exit.
-- "explore_fully" was worse at every depth tested (wandering monsters arrive faster than the experience helps; a level-1 hero exploring level 1-2 fully is killed by hobgoblins). Forcing "descend_asap" everywhere was also worse than leaving the pilot free (it skips items and easy experience).
-- Forcing rest below 60-75% HP when no enemy is in view gave a small gain (about +0.2 levels). The pilot already rests on its own most of the time.
-- Measured on this pilot over the same 16 seeds: pilot alone 9.4; "rest"=true whenever HP < 60% and no enemy in view 10.0; an older, stronger form of "fight" (which also removed resting and the stairs) forced whenever HP <= 50% with an enemy in view 8.8; both together 7.0. Forcing "flee" at critical HP scored worse than doing nothing. Forcing "escape" against every deadly monster changed nothing on average, because in 9 of 10 such fights the stairs were not known yet. A previous strategist that answered "fight" at nearly every low-HP consultation scored 6.7 against 10.3 for the pilot alone. The pilot's own choice inside a fight is as good as any rule; use "fight"/"flee"/"escape" only when the situation has a feature the pilot cannot see (a known exit, a special attack worth avoiding, a fight that is hopeless by the numbers).
-- A strategist that used "explore_fully" and "fight" liberally scored 4.5; one that left everything free scored about the same as the pilot alone. Every constraint replaces the pilot's judgement, so set one only when you can say why the pilot's default would be wrong here.
+Briefing: what was measured on this pilot (128 games from level 1, no strategist) and on earlier pilots. Use it to calibrate, then decide for yourself.
+- This pilot alone averages dungeon level 6.2 (best 16) and ends at experience level 3.7 with 20 kills. Two hand-written rule sets in the same games: one that explores each level before descending averages 7.8 (experience level 5.3, 61 kills), one that dives 9.2 (4.7, 30 kills). Nobody has reached 20.
+- Where this pilot dies: 41% of its games end on levels 1-4, mostly to a hobgoblin (26 of those 53 deaths) or a rattlesnake, at experience level 1-2. From level 6 on the killers are centaurs, quaggas, trolls and zombies against a hero of experience level 4-5. At a given depth this pilot is one to two experience levels below the exploring rule set (on level 8: 4.8 vs 5.8; on level 10: 5.3 vs 7.3).
+- An earlier pilot, which explored on its own before descending, was studied over 64 deaths: in 52% the killer was already rated "deadly" the first time it was seen, in 91% the stairs were not known yet, the median time from first sight to death was 7 turns, and in 56% the hero had 80%+ HP when the killer appeared. So most deaths are a fight that could not be won or escaped once it started. What a strategist can influence is the state the hero is in when the next monster appears, and whether the stairs are used as an exit.
+- Also on earlier pilots: forcing rest below 60-75% HP when no enemy is in view gave a small gain (about +0.2 levels; the pilot already rests on its own most of the time). Over the same 16 seeds: pilot alone 9.4; "rest"=true whenever HP < 60% and no enemy in view 10.0; an older, stronger form of "fight" (which also removed resting and the stairs) forced whenever HP <= 50% with an enemy in view 8.8; both together 7.0. Forcing "flee" at critical HP scored worse than doing nothing. Forcing "escape" against every deadly monster changed nothing on average, because in 9 of 10 such fights the stairs were not known yet. A previous strategist that answered "fight" at nearly every low-HP consultation scored 6.7 against 10.3 for the pilot alone. The pilot's own choice inside a fight is as good as any rule; use "fight"/"flee"/"escape" only when the situation has a feature the pilot cannot see (a known exit, a special attack worth avoiding, a fight that is hopeless by the numbers).
+- Every constraint replaces the pilot's judgement, so set one only when you can say why the pilot's default would be wrong here.
 - Starting armor two points better adds about 2.4 levels of depth. Better armor found on the floor is the most valuable thing in the game; aquators (rust) are its main enemy.
-Note: scrolls and missiles were added after the measurements above; the pilot was retrained with them, and their effect on the strategist's levers is not measured yet.
+Note: since the earlier measurements, rings (14 kinds), wands (14 kinds), cursed gear, treasure rooms, dragon fire, bow wielding, scrolls and missiles were added, the dungeon got harder (the exploring rule set fell from 8.5 to 7.8), and the pilot was retrained on all of it. The effect of the strategist's levers on this pilot is not measured yet.
 Default to plan="free", rest=false, tactic="free", heal_now=false, read_now="none", try_now="none", zap_now="none", ring_now="none", quaff_now="none", wield_now="none", fetch="none" and deviate with a concrete reason: for example "escape" when a deadly monster is awake, the stairs are known and the hero is not fresh; "rest"=true after a hard fight before pushing deeper; "heal_now" when critical in a fight that is otherwise winnable; "descend_asap" when hungry with no food; "flee"/"escape" from an aquator to protect good armor."""
 
 
@@ -170,7 +170,8 @@ def situation(g, trigger, st):
         f"Consulted because: {trigger}.",
         f"Dungeon level {g.depth} (goal {D.GOAL_DEPTH}). Turn {g.turn}, {g.turn - st.floor_turn} turns on this level.",
         f"Hero: HP {g.hp}/{g.max_hp}, experience level {g.level}, strength {g.str}/{g.max_str}, armor class {g.armor['ac']} ({g.armor['name']}), "
-        f"weapon {g.weapon['name']}.",
+        f"weapon {g.weapon['name']}. Experience for this depth: {pace_word(g)} "
+        f"(the pilot's own scale, experience level / dungeon level = {g.level / max(1, g.depth):.2f}: behind < 0.5 <= even < 0.8 <= ahead).",
         f"Hunger: {g.hunger_word()} (about {max(0, g.food_left)} turns of food in stomach). Food rations carried: {g.food}. "
         f"Healing potions: {g.has_heal()}. Other known potions: {', '.join(f'{n} x{c}' for n, c in g.potions.items() if n in g.known and c > 0 and n not in ('healing', 'extra healing')) or 'none'}. "
         f"Unidentified potions: {sum(g.unknown_potions().values())} ({len(g.unknown_potions())} kinds). "
@@ -285,9 +286,13 @@ class Strategist:
             self.tactic = "free"
         hp, hunger = hp_word(g), g.hunger_word()
         trigger = None
-        if g.depth != self.depth:  # 階の移動では相談しない (2026-09-24、244 回中 133 回を占めていたが成績に効かず、画面が止まるだけだった)
-            self.depth, self.floor_turn, self.known, self.trail, self.known_gear = g.depth, g.turn, set(), [], set()
-        if hp != self.hp_band and hp in ("low", "critical"):
+        if g.depth != self.depth:  # 新しい階: 経験が深さに対して behind / even のときだけ相談する (ahead なら呼ばない。全部の階で呼ぶ形は 2026-09-24 に外した:
+            self.depth, self.floor_turn, self.known, self.trail, self.known_gear = g.depth, g.turn, set(), [], set()  # 244 回中 133 回を占めて成績に効かなかった)
+            if pace_word(g) != "ahead":
+                trigger, self.kind = f"arrived on level {g.depth} with experience {pace_word(g)} for this depth", "floor"
+        if trigger:
+            pass
+        elif hp != self.hp_band and hp in ("low", "critical"):
             trigger, self.kind = f"HP dropped to {hp}", "hp"
         elif hunger != self.hunger and hunger != "fine":
             trigger, self.kind = f"hunger is now {hunger}", "hunger"
