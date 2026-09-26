@@ -111,7 +111,7 @@ def load_replay(path=None):
 def replay_generation(rec):
     """再生中に「学習世代」の欄に出す名前。laya/gen25b+llm のような頭脳名はそのまま出すと分かりにくいので、世代だけにする (Laya 以外の頭脳は名前のまま)。"""
     name = rec["brain"]
-    return name.removeprefix("laya/").removesuffix("+llm") if name.startswith("laya/") else name
+    return name.removeprefix("laya/").split("+")[0] if name.startswith("laya/") else name
 
 
 def adviser_state():

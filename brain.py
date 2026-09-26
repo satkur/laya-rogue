@@ -266,12 +266,10 @@ def redraw(d, allowed, sharpness, rng):
 
 def safety_valves(g, valid):
     """Actions the pilot may take this turn (NOTES 15, 2026-09-26): no resting next to an awake enemy (unless standing on a
-    scare monster scroll), no healing potion above half HP (unless blind). Applied by redraw, so the pilot still sees every option."""
+    scare monster scroll). Applied by redraw, so the pilot still sees every option. Anything more is a standing order (strategist.ORDERS)."""
     allowed = list(valid)
     if "rest" in allowed and "attack" in valid and not g.on_scare():  # "attack" is offered only when an awake enemy is in reach
         allowed.remove("rest")
-    if "quaff_heal" in allowed and g.hp >= 0.5 * g.max_hp and not g.blind:
-        allowed.remove("quaff_heal")
     return allowed or list(valid)
 
 

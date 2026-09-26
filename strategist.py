@@ -52,6 +52,7 @@ ZAPS = ["none", "bolt", "missile", "slow", "away", "polymorph", "drain", "cancel
 WIELDS = ["none", "bow", "melee"]
 QUAFFS = ["none", "haste", "raise", "see_invisible", "detect_monsters", "detect_magic"]
 FETCHES = ["none", "armor", "weapon", "food", "potion", "scroll", "wand", "ring", "gold"]
+ORDERS = ["save_healing", "avoid_rusters", "rest_before_stairs"]  # standing orders: the pilot knows how, the strategist decides when (NOTES 15)
 FETCH_TURNS = 30      # fetch (その種類の品を拾いに行く) の有効期間
 SCHEMA = {
     "type": "object",
@@ -67,9 +68,10 @@ SCHEMA = {
         "quaff_now": {"type": "string", "enum": QUAFFS},
         "wield_now": {"type": "string", "enum": WIELDS},
         "fetch": {"type": "string", "enum": FETCHES},
+        "orders": {"type": "array", "items": {"type": "string", "enum": ORDERS}},
         "reason": {"type": "string"},
     },
-    "required": ["plan", "rest", "tactic", "heal_now", "read_now", "try_now", "zap_now", "ring_now", "quaff_now", "wield_now", "fetch", "reason"],
+    "required": ["plan", "rest", "tactic", "heal_now", "read_now", "try_now", "zap_now", "ring_now", "quaff_now", "wield_now", "fetch", "orders", "reason"],
     "additionalProperties": False,
 }
 
@@ -104,6 +106,8 @@ Your outputs:
 - wield_now: "bow" = wield the bow on the next turn (if carried, with arrows, and a monster is in line at distance 2+); "melee" = wield the melee weapon again; "none" = nothing. One-shot.
 - try_now: "potion" = drink an unidentified potion on the next turn; "scroll" = read an unidentified scroll; "identify" = read a known scroll of identify; "none" = nothing. One-shot. Testing unknown items is safest with no monster in view, full HP and the stairs known.
 - fetch: "armor" / "weapon" / "food" / "potion" / "scroll" / "wand" / "ring" / "gold" = walk to the nearest item of that kind in view and pick it up, ignoring everything else while no monster is awake in view. Cleared when it is picked up, when a monster wakes up, or after 30 turns. "none" = nothing. The pilot on its own rarely detours for items (it learned that most floor items are not worth the walk), so this is how you make it collect a specific thing, e.g. better armor. A better weapon or armor is worn automatically once carried.
+- orders: standing orders, a list that stays in force across levels until you send a different list (send the full list each time; [] cancels all). The pilot knows how to carry each one out; you decide when it applies.
+  "save_healing" = keep healing potions for emergencies: drink one only below half HP. "avoid_rusters" = never rest or walk up to an aquator, and when one is adjacent either hit it or step away (no resting, exploring or picking up next to it) - rust is permanent and armor is what keeps the hero alive deeper down. "rest_before_stairs" = do not take the stairs below 90% HP while no enemy is in view (rest first; ignored when hungry-weak or worse).
 - reason: one short sentence in Japanese, shown to the player.
 
 Briefing: what was measured on this pilot (128 games from level 1, no strategist) and on earlier pilots. Use it to calibrate, then decide for yourself.
@@ -114,7 +118,7 @@ Briefing: what was measured on this pilot (128 games from level 1, no strategist
 - Every constraint replaces the pilot's judgement, so set one only when you can say why the pilot's default would be wrong here.
 - Starting armor two points better adds about 2.4 levels of depth. Better armor found on the floor is the most valuable thing in the game; aquators (rust) are its main enemy.
 Note: since the earlier measurements, rings (14 kinds), wands (14 kinds), cursed gear, treasure rooms, dragon fire, bow wielding, scrolls and missiles were added, the dungeon got harder (the exploring rule set fell from 8.5 to 7.8), and the pilot was retrained on all of it. The effect of the strategist's levers on this pilot is not measured yet.
-Default to plan="free", rest=false, tactic="free", heal_now=false, read_now="none", try_now="none", zap_now="none", ring_now="none", quaff_now="none", wield_now="none", fetch="none" and deviate with a concrete reason: for example "escape" when a deadly monster is awake, the stairs are known and the hero is not fresh; "rest"=true after a hard fight before pushing deeper; "heal_now" when critical in a fight that is otherwise winnable; "descend_asap" when hungry with no food; "flee"/"escape" from an aquator to protect good armor."""
+Default to plan="free", rest=false, tactic="free", heal_now=false, read_now="none", try_now="none", zap_now="none", ring_now="none", quaff_now="none", wield_now="none", fetch="none", orders=[] and deviate with a concrete reason: for example "escape" when a deadly monster is awake, the stairs are known and the hero is not fresh; "rest"=true after a hard fight before pushing deeper; "heal_now" when critical in a fight that is otherwise winnable; "descend_asap" when hungry with no food; "flee"/"escape" from an aquator to protect good armor."""
 
 
 def dice_text(w):
@@ -213,7 +217,7 @@ def situation(g, trigger, st):
         lines.append("Tried but not identified: " + ", ".join(sorted(g.names[k] for k in g.tried)) + ".")
     if g.gear:
         lines.append("Carried but not worn: " + ", ".join(item_detail(g, x) for x in g.gear) + ".")
-    lines.append(f"Decision in force: plan={st.plan}, rest={st.rest}, tactic={st.tactic}, fetch={st.fetch}.")
+    lines.append(f"Decision in force: plan={st.plan}, rest={st.rest}, tactic={st.tactic}, fetch={st.fetch}, orders={sorted(st.orders)}.")
     if st.recent:
         lines.append("Recent actions (oldest first): " + " ".join(st.recent[-20:]))
     if g.log:
@@ -240,7 +244,7 @@ def ask(text, model=DEFAULT_MODEL, effort="high", system=SYSTEM):
     if (not isinstance(d, dict) or d.get("plan") not in PLANS or d.get("tactic") not in TACTICS or d.get("read_now", "none") not in READS
             or d.get("try_now", "none") not in TRIES or d.get("zap_now", "none") not in ZAPS or d.get("ring_now", "none") not in RINGS
             or d.get("quaff_now", "none") not in QUAFFS or d.get("wield_now", "none") not in WIELDS
-            or d.get("fetch", "none") not in FETCHES):
+            or d.get("fetch", "none") not in FETCHES or not set(d.get("orders", [])) <= set(ORDERS)):
         raise RuntimeError("想定外の応答: " + p.stdout[:300])
     u = out.get("usage", {})
     tokens = sum(u.get(k, 0) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"))
@@ -253,8 +257,10 @@ total_calls = 0  # プロセス全体の呼び出し回数 (自動停止用)
 class Strategist:
     """1 ゲーム分の方針。check() が「いま呼ぶべき理由」を返し、consult() が呼び、allowed() が選択肢を絞る。"""
 
-    def __init__(self, model=DEFAULT_MODEL, effort="high", enabled=True, asker=ask):
+    def __init__(self, model=DEFAULT_MODEL, effort="high", enabled=True, asker=ask, orders=()):
+        """asker=None with orders: a fixed strategist that never consults and only keeps those standing orders (for measuring them)."""
         self.model, self.effort, self.enabled, self.asker = model, effort, enabled, asker
+        self.fixed_orders = set(orders)
         self.calls = self.tokens = self.errors = 0
         self.seconds = 0.0
         self.stopped = None  # 自動停止した理由
@@ -264,6 +270,7 @@ class Strategist:
 
     def reset(self):
         self.plan, self.rest, self.tactic, self.heal_now, self.reason = "free", False, "free", False, ""
+        self.orders = set(self.fixed_orders)
         self.read_now = self.try_now = self.zap_now = self.ring_now = self.quaff_now = self.wield_now = "none"
         self.fetch, self.fetch_until = "none", 0
         self.known_gear = set()  # すでに相談した「良い装備」 (名前, 位置)
@@ -279,7 +286,7 @@ class Strategist:
 
     # ------------------------------------------------------------------ いつ呼ぶか
     def check(self, g):
-        if not self.enabled or self.stopped:
+        if not self.enabled or self.stopped or self.asker is None:
             return None
         self.trail = (self.trail + [(g.hx, g.hy)])[-STUCK_SPAN:]
         awake = [m for m in g.visible_monsters() if active(m)]
@@ -351,6 +358,7 @@ class Strategist:
         self.wield_now = d.get("wield_now", "none")
         self.fetch = d.get("fetch", "none")
         self.fetch_until = g.turn + FETCH_TURNS
+        self.orders = set(d.get("orders", []))
         self.history.append({"turn": g.turn, "depth": g.depth, "hp": g.hp, "max_hp": g.max_hp, "level": g.level, "kind": self.kind,
                              "trigger": trigger, **d, "sec": round(sec, 1), "valid": g.valid_actions(), "recent": self.recent[-12:]})
         return {"trigger": trigger, "kind": self.kind, **d, "sec": round(sec, 1), "tokens": tokens, "calls": self.calls}
@@ -416,8 +424,24 @@ class Strategist:
             drop |= {"descend", "ascend"}
         elif self.plan == "descend_asap" and ("descend" in valid or "ascend" in valid) and not awake:
             drop |= {"explore", "pick_up"}
+        drop |= self.order_drops(g, valid, awake)
         kept = [a for a in valid if a not in drop]
         return kept or valid
+
+    def order_drops(self, g, valid, awake):
+        """Actions the standing orders remove this turn."""
+        drop = set()
+        if "save_healing" in self.orders and g.hp >= 0.5 * g.max_hp and not g.blind:
+            drop.add("quaff_heal")
+        if "avoid_rusters" in self.orders:
+            rusters = [m for m in g.visible_monsters() if m["kind"] == "aquator" and m["awake"]]
+            if rusters:
+                drop |= {"rest", "approach"}
+                if any(g.dist(m["x"], m["y"]) <= 1 for m in rusters):
+                    drop |= {"pick_up", "explore", "search"}
+        if "rest_before_stairs" in self.orders and not awake and "rest" in valid and g.hp < 0.9 * g.max_hp and g.hunger_word() in ("fine", "hungry"):
+            drop.add("descend")
+        return drop
 
 
 class Masked:
@@ -438,7 +462,8 @@ class Guided:
 
     def __init__(self, brain, strategist):
         self.brain, self.strategist, self.game = brain, strategist, None
-        self.name = f"{getattr(brain, 'name', 'brain')}+llm"
+        tag = "llm" if strategist.asker else "+".join(sorted(strategist.fixed_orders)) or "none"
+        self.name = f"{getattr(brain, 'name', 'brain')}+{tag}"
 
     def decide(self, g):
         st = self.strategist
