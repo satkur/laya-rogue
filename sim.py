@@ -110,6 +110,7 @@ def play(brain, seed, max_turns, start=None, difficulty="normal"):
     g = Game(seed, standard_hero(start) if start else None, difficulty)
     if hasattr(brain, "rng"):  # 行動を引く乱数もゲームごとにシードで決める。共有したままだと同じ重みでも並べる順で結果が変わる
         brain.rng = random.Random(seed)
+    g.action_rng = random.Random(seed)  # Laya はこちらを使う。方針役つき (Guided / Locked 越しで brain.rng が付かず、4 ゲームが 1 つの Laya を共有) でも単独と同じゲームになる (NOTES 15 章)
     ms, miss, n = [], 0, 0
     stalls, trail, acts, stall_depth = [], [], [], 0  # 行き詰まり: 敵もいないのに数マスを往復し続ける (NOTES 13 章)
     while not g.over and g.turn < max_turns:

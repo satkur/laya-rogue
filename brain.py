@@ -286,7 +286,7 @@ class LayaBrain:
         t0 = time.perf_counter()
         probs = self.agent.predict(state, q)["answers"]["action"]["probabilities"]
         ms = (time.perf_counter() - t0) * 1000
-        return {"action": choose(probs, self.sharpness, self.rng), "probs": probs, "state": state, "ms": ms}
+        return {"action": choose(probs, self.sharpness, getattr(g, "action_rng", self.rng)), "probs": probs, "state": state, "ms": ms}
 
 
 class TableBrain:

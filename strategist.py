@@ -7,7 +7,7 @@
   - 将来はこの役をプレイヤーに渡すか、プレイヤーの補助として残す
 
 呼ぶ場面:
-  floor    新しい階に着いた
+  floor    新しい階に着いた (深さに対して経験が behind / even のときだけ。ahead なら呼ばない。2026-09-26)
   hp       体力が low / critical に落ちた
   hunger   空腹になった
   danger   手強い敵 (互角以上、または特殊攻撃持ち) が起きて視界に入った
@@ -74,7 +74,7 @@ SCHEMA = {
 
 SYSTEM = f"""You are the strategist for a hero in a Rogue 5.4-style dungeon crawl. Goal: reach dungeon level {D.GOAL_DEPTH} alive.
 A small, fast model ("the pilot", trained by 20,000 games of self-play) picks the hero's action every turn. You do not pick actions. You set constraints that remove options from it, and they stay in force until the next consultation.
-You are consulted when HP or hunger worsens, when a non-trivial monster wakes up in view, when a better weapon or armor comes into view, when the hero seems stuck, and periodically while a constraint is in force (not on arrival at a new level). Each consultation costs several seconds of real time, nothing in game time.
+You are consulted on arrival at a new level when the hero's experience level is behind or even for the depth (not when it is ahead), when HP or hunger worsens, when a non-trivial monster wakes up in view, when a better weapon or armor comes into view, when the hero seems stuck, and periodically while a constraint is in force. Each consultation costs several seconds of real time, nothing in game time.
 
 Rules of this game (subset of Rogue 5.4.4):
 - Monsters get stronger with depth. The hero gets stronger by experience levels (killing monsters), better weapons/armor found on the floor, strength potions, and scrolls of enchant armor / enchant weapon / protect armor (the pilot reads them with "read_enchant_armor" / "read_enchant_weapon" / "read_protect"). One weapon in ten and one armor in five is cursed (a bad bonus, and it cannot be taken off once worn; enchant or remove curse lifts it). Dragons breathe fire (6d6 unless the hero resists) at a hero in a straight line within 6 squares.
@@ -287,9 +287,13 @@ class Strategist:
             self.tactic = "free"
         hp, hunger = hp_word(g), g.hunger_word()
         trigger = None
-        if g.depth != self.depth:  # 階の移動では相談しない (2026-09-24、244 回中 133 回を占めていたが成績に効かず、画面が止まるだけだった)
-            self.depth, self.floor_turn, self.known, self.trail, self.known_gear = g.depth, g.turn, set(), [], set()
-        if hp != self.hp_band and hp in ("low", "critical"):
+        if g.depth != self.depth:  # 新しい階: 経験が深さに対して behind / even のときだけ相談する (ahead なら呼ばない。全部の階で呼ぶ形は 2026-09-24 に外した:
+            self.depth, self.floor_turn, self.known, self.trail, self.known_gear = g.depth, g.turn, set(), [], set()  # 244 回中 133 回を占めて成績に効かなかった)
+            if pace_word(g) != "ahead":
+                trigger, self.kind = f"arrived on level {g.depth} with experience {pace_word(g)} for this depth", "floor"
+        if trigger:
+            pass
+        elif hp != self.hp_band and hp in ("low", "critical"):
             trigger, self.kind = f"HP dropped to {hp}", "hp"
         elif hunger != self.hunger and hunger != "fine":
             trigger, self.kind = f"hunger is now {hunger}", "hunger"
