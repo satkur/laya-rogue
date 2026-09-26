@@ -30,7 +30,7 @@ import subprocess
 import time
 
 import rogue_data as D
-from brain import SPECIAL, choose, dist_word, hp_word, pace_word, threat_word
+from brain import SPECIAL, dist_word, hp_word, pace_word, redraw, threat_word
 from game import active
 
 DEFAULT_MODEL = "claude-sonnet-5"   # 方針役の既定 (2026-09-24 に Sonnet 5 へ。Opus は過剰。claude -p の --model に渡す)
@@ -459,12 +459,8 @@ def decide_within(brain, g, st):
     g.pick_kind = None  # fetch's pick target must not leak into this turn's options (they are recorded and replayed without it)
     valid = g.valid_actions()
     allowed = st.allowed(g, valid)  # may set g.pick_kind for the step
-    d = brain.decide(Masked(g, valid))
-    if d["action"] not in allowed:
-        probs = {a: p for a, p in d["probs"].items() if a in allowed and p > 0}
-        if probs:
-            d["action"] = choose(probs, getattr(brain, "sharpness", None), getattr(g, "action_rng", random))
-        else:  # a one-hot brain (rules / diver): ask it again with only the allowed options
-            d = brain.decide(Masked(g, allowed))
+    d = redraw(brain.decide(Masked(g, valid)), allowed, getattr(brain, "sharpness", None), getattr(g, "action_rng", random))
+    if d["action"] not in allowed:  # a one-hot brain (rules / diver): ask it again with only the allowed options
+        d = brain.decide(Masked(g, allowed))
     st.recent = (st.recent + [d["action"]])[-40:]
     return d

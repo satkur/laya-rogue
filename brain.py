@@ -253,6 +253,28 @@ def choose(probs, sharpness, rng):
     return rng.choices(acts, [probs[a] ** sharpness for a in acts])[0]
 
 
+def redraw(d, allowed, sharpness, rng):
+    """Keep the pilot's decision if allowed, else draw again from its own distribution over the allowed actions.
+    (Hiding options from the pilot instead shows it option sets it never trained on; NOTES 15.)"""
+    if d["action"] in allowed:
+        return d
+    probs = {a: p for a, p in d["probs"].items() if a in allowed and p > 0}
+    if probs:
+        d["action"] = choose(probs, sharpness, rng)
+    return d
+
+
+def safety_valves(g, valid):
+    """Actions the pilot may take this turn (NOTES 15, 2026-09-26): no resting next to an awake enemy (unless standing on a
+    scare monster scroll), no healing potion above half HP (unless blind). Applied by redraw, so the pilot still sees every option."""
+    allowed = list(valid)
+    if "rest" in allowed and "attack" in valid and not g.on_scare():  # "attack" is offered only when an awake enemy is in reach
+        allowed.remove("rest")
+    if "quaff_heal" in allowed and g.hp >= 0.5 * g.max_hp and not g.blind:
+        allowed.remove("quaff_heal")
+    return allowed or list(valid)
+
+
 class LayaBrain:
     """generation=None で素の Laya、名前を渡すと weights/<名前>.pt の学習済みヘッドを載せる。"""
 
@@ -286,7 +308,9 @@ class LayaBrain:
         t0 = time.perf_counter()
         probs = self.agent.predict(state, q)["answers"]["action"]["probabilities"]
         ms = (time.perf_counter() - t0) * 1000
-        return {"action": choose(probs, self.sharpness, getattr(g, "action_rng", self.rng)), "probs": probs, "state": state, "ms": ms}
+        rng = getattr(g, "action_rng", self.rng)
+        d = {"action": choose(probs, self.sharpness, rng), "probs": probs, "state": state, "ms": ms}
+        return redraw(d, safety_valves(g, valid), self.sharpness, rng)
 
 
 class TableBrain:
