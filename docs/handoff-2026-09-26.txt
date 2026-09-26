@@ -23,20 +23,17 @@ laya-rogue 引き継ぎ (2026-09-26 夜。全部 push 済み。詳細は NOTES.m
 - コメントは英語で少なめ。game.py (5.4.4 準拠) 以外は随時リファクタ / simplify してよい。無理な要望は理由付きでスキップ可
 - 画面: 青い帯は使わない (IBM PC 版に青はない)。DOS テーマの枠は灰色、茶色は壁だけ。テーマ名は「xterm 風」
 
-■ 進行中: 固定命令の測定 (data/orders_gen25b.log、21:23 開始、1 条件 30 分)
-    uv run sim.py 128 8000 laya:gen25b laya:gen25b+orders:save_healing laya:gen25b+orders:avoid_rusters laya:gen25b+orders:rest_before_stairs laya:gen25b+orders:save_healing,avoid_rusters,rest_before_stairs
-    続けて --start 10 で なし / 3 つ全部
-  結果 (出た分。残りはログを見る):
+■ 固定命令の測定 (data/orders_gen25b.log): 「なし」の 1 条件だけ終わり、22:18 に中断 (ユーザーが PC を使うため)
+  出た分:
     なし (待機の弁だけ)             6.76 ±0.37 (10 階以上 37、Lv 3.8、撃破 22.0)
-    save_healing                    (待ち)
-    avoid_rusters                   (待ち)
-    rest_before_stairs              (待ち)
-    3 つ全部                        (待ち)
-    B10F なし / 3 つ全部            (待ち)   基準 13.02
   基準 (待機の弁 + 回復薬 50% の弁、data/valves_gen25b.log): 1 階から 6.80 ±0.38、B10F 13.02 ±0.17
+  → 回復薬 50% の弁はほぼ効いていない。+0.6 は待機の弁
+  残りを回すコマンド (1 条件 30 分、B10F は各 14 分。PowerShell Start-Process で切り離し、python を High に):
+    uv run sim.py 128 8000 laya:gen25b+orders:save_healing laya:gen25b+orders:avoid_rusters laya:gen25b+orders:rest_before_stairs laya:gen25b+orders:save_healing,avoid_rusters,rest_before_stairs
+    uv run sim.py 128 8000 laya:gen25b laya:gen25b+orders:save_healing,avoid_rusters,rest_before_stairs --start 10
 
 ■ 次にやること
-1. 固定命令の結果を NOTES 15 章に書く。効いた命令だけを指示役の語彙に残す (効かない命令は SYSTEM の説明から外す)
+1. 上の残りを回して NOTES 15 章の表に足す。効いた命令だけを指示役の語彙に残す (効かない命令は SYSTEM の説明から外す)
 2. 本物の指示役 (llm:sonnet) で 16 シード: uv run sim.py 16 8000 laya:gen25b+llm:sonnet laya:gen25b (約 25 分・300 万トークン)
    見るもの: 指示役が orders をいつ出すか (llm_<種>.json の history に orders が入る)、到達階 (単独 7.44 と同じゲーム)
 3. B 段: A 段の結果しだいで判断
