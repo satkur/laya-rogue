@@ -226,11 +226,11 @@ const THEMES = {
     items: { gold: "#e2c25c", food: "#c9a87a", potion: "#b184c4", weapon: "#a9b4bd", armor: "#a9b4bd", scroll: "#d9d4a8", missile: "#a9b4bd", bow: "#a9b4bd", ring: "#e8c9ff", stick: "#c8e0a0", amulet: "#ffd54a" },
     awake: "#c85a44", asleep: "#8d8a72", hero: "#f2dc96", heroHit: "#d8563f", heroGlow: "255,180,80", hpBack: "#2a0d0a", hpFill: "#b8433a",
     dmg: "#d8563f", heal: "#8fbf6a", hit: "#ecd07a", shout: "#ecd07a" } },
-  dos: { name: "DOS 16 色", css: {   // IBM PC Rogue look, CGA 16 colors
-    "--bg": "#000", "--panel": "#000", "--frame": "#aa5500", "--frame-hi": "#ffff55", "--sel": "#0000aa", "--text": "#aaaaaa", "--dim": "#555555", "--faint": "#2c2c2c", "--track": "#1c1c1c",
-    "--accent": "#ffff55", "--ok": "#55ff55", "--warn": "#ffff55", "--bad": "#ff5555", "--header-bg": "#0000aa", "--legend-fg": "#000", "--legend-em": "#ffffff", "--shadow": "#000",
+  dos: { name: "DOS 16 色", css: {   // IBM PC Rogue look, CGA 16 colors on black (no blue bars: those are Norton / Windows, not Rogue)
+    "--bg": "#000", "--panel": "#000", "--frame": "#aa5500", "--frame-hi": "#ffff55", "--sel": "#2a2a2a", "--text": "#aaaaaa", "--dim": "#555555", "--faint": "#2c2c2c", "--track": "#1c1c1c",
+    "--accent": "#ffff55", "--ok": "#55ff55", "--warn": "#ffff55", "--bad": "#ff5555", "--header-bg": "#000", "--legend-fg": "#000", "--legend-em": "#ffffff", "--shadow": "#000",
     "--blink": "#aa0000", "--state": "#aaaaaa", "--kbd-fg": "#000", "--glow": "rgba(255, 255, 85, .14)", "--glow-strong": "rgba(255, 255, 85, .25)",
-    "--died-bg": "rgba(170, 0, 0, .5)", "--died-shadow": "#550000", "--won-bg": "rgba(0, 0, 170, .5)", "--won-shadow": "#000055" }, game: {
+    "--died-bg": "rgba(170, 0, 0, .5)", "--died-shadow": "#550000", "--won-bg": "rgba(0, 85, 0, .5)", "--won-shadow": "#003300" }, game: {
     bg: "#000", wallStyle: "line", box: BOX, passageGlyph: "▒", floorGlyph: "·",
     wallLit: "#ffff55", wallDark: "#aa5500", passageLit: "#aaaaaa", passageDark: "#555555", floorLit: "#aaaaaa", floorDark: "#555555",
     stairs: ["#55ff55", "#00aa00"], door: ["#ffff55", "#aa5500"], trap: "#ff55ff",
@@ -238,7 +238,7 @@ const THEMES = {
     awake: "#ff5555", asleep: "#aaaaaa", hero: "#ffff55", heroHit: "#ff5555", heroGlow: "255,255,85", hpBack: "#550000", hpFill: "#ff5555",
     dmg: "#ff5555", heal: "#55ff55", hit: "#ffff55", shout: "#ffffff" } },
   cga: { name: "CGA 4 色", css: {     // CGA palette 1 (cyan / magenta / white), darker shades only for backgrounds
-    "--bg": "#000", "--panel": "#000", "--frame": "#ff55ff", "--frame-hi": "#ffffff", "--sel": "#2a002a", "--text": "#55ffff", "--dim": "#a03aa0", "--faint": "#402040", "--track": "#201020",
+    "--bg": "#000", "--panel": "#000", "--frame": "#ff55ff", "--frame-hi": "#ffffff", "--sel": "#202020", "--text": "#55ffff", "--dim": "#a03aa0", "--faint": "#402040", "--track": "#201020",
     "--accent": "#ffffff", "--ok": "#55ffff", "--warn": "#ffffff", "--bad": "#ff55ff", "--header-bg": "#000", "--legend-fg": "#000", "--legend-em": "#ffffff", "--shadow": "#000",
     "--blink": "#aa00aa", "--state": "#55ffff", "--kbd-fg": "#000", "--glow": "rgba(85, 255, 255, .16)", "--glow-strong": "rgba(255, 85, 255, .3)",
     "--died-bg": "rgba(120, 0, 120, .5)", "--died-shadow": "#550055", "--won-bg": "rgba(0, 120, 120, .5)", "--won-shadow": "#005555" }, game: {
@@ -249,10 +249,10 @@ const THEMES = {
     awake: "#ff55ff", asleep: "#7a2a7a", hero: "#ffffff", heroHit: "#ff55ff", heroGlow: "85,255,255", hpBack: "#3a003a", hpFill: "#ff55ff",
     dmg: "#ff55ff", heal: "#55ffff", hit: "#ffffff", shout: "#ffffff" } },
   ansi: { name: "端末 16 色", css: {  // ANSI 16-color terminal roguelike look
-    "--bg": "#000", "--panel": "#000", "--frame": "#808080", "--frame-hi": "#ffffff", "--sel": "#000080", "--text": "#c0c0c0", "--dim": "#808080", "--faint": "#333333", "--track": "#222222",
-    "--accent": "#ffff55", "--ok": "#55ff55", "--warn": "#ffff55", "--bad": "#ff5555", "--header-bg": "#000080", "--legend-fg": "#000", "--legend-em": "#ffffff", "--shadow": "#000",
+    "--bg": "#000", "--panel": "#000", "--frame": "#808080", "--frame-hi": "#ffffff", "--sel": "#2a2a2a", "--text": "#c0c0c0", "--dim": "#808080", "--faint": "#333333", "--track": "#222222",
+    "--accent": "#ffff55", "--ok": "#55ff55", "--warn": "#ffff55", "--bad": "#ff5555", "--header-bg": "#000", "--legend-fg": "#000", "--legend-em": "#ffffff", "--shadow": "#000",
     "--blink": "#800000", "--state": "#c0c0c0", "--kbd-fg": "#000", "--glow": "rgba(192, 192, 192, .12)", "--glow-strong": "rgba(255, 255, 85, .25)",
-    "--died-bg": "rgba(128, 0, 0, .5)", "--died-shadow": "#400000", "--won-bg": "rgba(0, 0, 128, .5)", "--won-shadow": "#000040" }, game: {
+    "--died-bg": "rgba(128, 0, 0, .5)", "--died-shadow": "#400000", "--won-bg": "rgba(0, 64, 0, .5)", "--won-shadow": "#002000" }, game: {
     bg: "#000", wallStyle: "line", box: ASCII, passageGlyph: "#", floorGlyph: ".",
     wallLit: "#ffffff", wallDark: "#808080", passageLit: "#c0c0c0", passageDark: "#606060", floorLit: "#c0c0c0", floorDark: "#505050",
     stairs: ["#ffffff", "#808080"], door: ["#ffff55", "#808000"], trap: "#ff55ff",
