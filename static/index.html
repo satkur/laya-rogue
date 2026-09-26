@@ -230,6 +230,7 @@ ws.onmessage = ev => {
   const m = JSON.parse(ev.data);
   if (m.type === "hello") { GW = m.w; GH = m.h; $("device").textContent = m.replay ? `再生: ${m.replay}` : ""; resize(); pushConfig(); generation = m.generation; $("genNow").textContent = genLabel(generation); setupDifficulties(m.difficulties, m.difficulty); setupOrders(m.orders, m.order); setAdviser(m.adviser); }
   else if (m.type === "adviser") setAdviser(m.adviser);
+  else if (m.type === "replay") { $("device").textContent = `再生: ${m.file}`; generation = m.generation; $("genNow").textContent = genLabel(generation); setDifficulty(m.difficulty); }
   else if (m.type === "thinking") { $("adviser").classList.add("thinking"); $("reason").textContent = `方針役が考え中… (${TRIGGER_JP[m.kind] ?? m.kind})`; }
   else if (m.type === "advice") onAdvice(m);
   else if (m.type === "order") setOrder(m.order, true);

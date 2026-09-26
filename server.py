@@ -8,10 +8,13 @@
     uv run server.py --difficulty original   # 難易度 (既定 normal)。画面からも切り替えられる (NOTES.md 15 章)
     uv run server.py --replay data/replays/laya-gen25b_5004.json   # sim.py / learn.py が残した記録を再生する (Laya も方針役も呼ばない。
                                              # 回している最中の記録は末尾を追いかける。R で最初から。難易度と方針役の切替は効かない)
+    uv run server.py --replay data/replays   # ディレクトリなら、いちばん新しい記録を追いかける。記録中なら終わり近くまで飛ばしてから追いかけ、
+                                             # そのゲームが終わったら次に新しい記録へ自動で移る (回している最中の対戦をそのまま見る用)
 """
 import asyncio
 import json
 import sys
+import time
 import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -36,6 +39,8 @@ GENERATION = sys.argv[sys.argv.index("--gen") + 1] if "--gen" in sys.argv else D
 DIFFICULTY = sys.argv[sys.argv.index("--difficulty") + 1] if "--difficulty" in sys.argv else "normal"
 D.rules(DIFFICULTY)  # 名前の検査
 REPLAY = Path(sys.argv[sys.argv.index("--replay") + 1]) if "--replay" in sys.argv else None
+REPLAY_DIR = REPLAY if REPLAY and REPLAY.is_dir() else None  # ディレクトリなら常に最新の記録を追いかける
+CATCH_UP = 100  # 記録中の記録に移るとき、末尾のこの手数だけ残して飛ばす
 replay_state = {"enabled": False, "model": "", "stopped": None, "calls": 0, "plan": "free", "rest": False, "tactic": "free", "fetch": "none"}  # 再生中の方針役の表示
 adviser = Strategist(model=LLM_MODEL, enabled="--llm" in sys.argv)  # いまは付けると成績が下がるので既定は切 (NOTES.md 6 章)
 strategist_mod.MAX_CALLS_TOTAL = 300  # 画面を開きっぱなしにしても、ここで方針役は自動で止まる (画面で入れ直すと再開)
@@ -52,9 +57,14 @@ async def lifespan(app: FastAPI):
     global brain
     url = f"http://{HOST}:{PORT}/"
     if REPLAY:
-        rec = load_replay()
-        replay_state.update(enabled=bool(rec["advice"]), model="再生")
-        print(f"再生: {REPLAY} ({rec['brain']}, 種 {rec['seed']}, {len(rec['actions'])} 手{'' if rec.get('done') else '、記録中'})\n  → {url}", flush=True)
+        path = latest_replay()
+        if path is None:
+            print(f"{REPLAY_DIR} に記録がない (回し始めてから開く)\n  → {url}", flush=True)
+        else:
+            rec = load_replay(path)
+            replay_state.update(enabled=bool(rec["advice"]), model="再生")
+            print(f"再生: {path} ({rec['brain']}, 種 {rec['seed']}, {len(rec['actions'])} 手{'' if rec.get('done') else '、記録中'})"
+                  + (f"、以後は {REPLAY_DIR} の最新の記録を追いかける" if REPLAY_DIR else "") + f"\n  → {url}", flush=True)
     else:
         print(f"Laya を読み込み中... (難易度 {DIFFICULTY.upper()})", flush=True)
         gens = generations()
@@ -76,8 +86,22 @@ async def index():
     return FileResponse(STATIC / "index.html")
 
 
-def load_replay():
-    return json.loads(REPLAY.read_text(encoding="utf-8"))
+def latest_replay():
+    """追いかける記録: ディレクトリなら更新のいちばん新しい JSON (書きかけの .tmp は除く)。"""
+    if not REPLAY_DIR:
+        return REPLAY
+    files = [p for p in REPLAY_DIR.glob("*.json") if p.is_file()]
+    return max(files, key=lambda p: p.stat().st_mtime) if files else None
+
+
+def load_replay(path=None):
+    path = path or latest_replay()
+    for _ in range(5):  # 書き換えの瞬間に当たったら読み直す
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, FileNotFoundError):
+            time.sleep(0.2)
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def replay_generation(rec):
@@ -123,9 +147,10 @@ def frame(g, d, log_from):
 async def ws(sock: WebSocket):
     await sock.accept()
     cfg = {"delay": 0.119, "paused": False, "step": False, "restart": False}
-    await sock.send_json({"type": "hello", "w": W, "h": H, "generation": replay_generation(load_replay()) if REPLAY else brain.generation,
-                          "difficulties": list(D.DIFFICULTIES), "difficulty": load_replay().get("difficulty", "normal") if REPLAY else DIFFICULTY,
-                          "replay": REPLAY.name if REPLAY else None,
+    hello_rec = load_replay() if REPLAY and latest_replay() else None
+    await sock.send_json({"type": "hello", "w": W, "h": H, "generation": (replay_generation(hello_rec) if hello_rec else None) if REPLAY else brain.generation,
+                          "difficulties": list(D.DIFFICULTIES), "difficulty": hello_rec.get("difficulty", "normal") if hello_rec else DIFFICULTY,
+                          "replay": (latest_replay().name if latest_replay() else REPLAY_DIR.name) if REPLAY else None,
                           "orders": [], "order": None,  # 命令はいったん外してある
                           "adviser": adviser_state()})
 
@@ -169,14 +194,34 @@ async def ws(sock: WebSocket):
             cfg["restart"] = False
 
     async def play_replay():
-        """記録を再生する。記録がまだ書かれている最中なら末尾で待って追いかける。終わったら R まで止まる。"""
+        """記録を再生する。記録がまだ書かれている最中なら末尾で待って追いかける。終わったら R まで止まる
+        (ディレクトリを追いかけているときは、数秒見せてから次に新しい記録へ自動で移る)。"""
+        path = None
         while True:
-            rec = load_replay()
+            if REPLAY_DIR:
+                while (nxt := latest_replay()) is None or (nxt == path and not cfg["restart"] and load_replay(nxt).get("done")):
+                    await asyncio.sleep(1.0)  # 新しい記録が来るまで待つ (同じ記録は R のときだけ繰り返す)
+                path = nxt
+            else:
+                path = REPLAY
+            cfg["restart"] = False
+            rec = load_replay(path)
             g = Game(rec["seed"], standard_hero(rec["start"]) if rec.get("start") else None, rec.get("difficulty", "normal"))
-            g.say(f"再生: {REPLAY.name} (地図の種 {g.seed})")
             replay_state.update(enabled=bool(rec["advice"]), model="再生", calls=0, plan="free", rest=False, tactic="free", fetch="none")
             advice_at = {a["i"]: a for a in rec["advice"]}
             depth, log_from, i = g.depth, 0, 0
+            await sock.send_json({"type": "replay", "file": path.name, "generation": replay_generation(rec), "difficulty": rec.get("difficulty", "normal")})
+            if REPLAY_DIR and not rec.get("done") and len(rec["actions"]) > CATCH_UP:  # 記録中の記録: 終わり近くまで画面に出さずに進める
+                while i < len(rec["actions"]) - CATCH_UP:
+                    if (a := advice_at.get(i)):
+                        replay_state.update(calls=replay_state["calls"] + 1, **{k: a[k] for k in ("plan", "rest", "tactic", "fetch") if k in a})
+                    g.valid_actions()  # 記録時と同じ順で呼ぶ (探索先などの副作用がある)
+                    g.step(rec["actions"][i])
+                    i += 1
+                depth = g.depth
+                g.log.clear()
+                await sock.send_json({"type": "adviser", "adviser": adviser_state()})
+            g.say(f"再生: {path.name} (地図の種 {g.seed}" + (f"、{i} 手目から" if i else "") + ")")
             await sock.send_json({"type": "floor", "depth": depth})
             await sock.send_json(frame(g, {"action": None, "probs": {}, "state": "", "ms": 0.0}, log_from))
             g.newly_seen = []
@@ -189,7 +234,7 @@ async def ws(sock: WebSocket):
                     if rec.get("done"):
                         break
                     await asyncio.sleep(1.0)  # まだ記録中: 追いつくまで待つ
-                    rec = load_replay()
+                    rec = load_replay(path)
                     advice_at = {a["i"]: a for a in rec["advice"]}
                     continue
                 a = advice_at.get(i)
@@ -199,6 +244,7 @@ async def ws(sock: WebSocket):
                 action = rec["actions"][i]
                 i += 1
                 d = {"action": action, "probs": {action: 1.0}, "state": "", "ms": 0.0}
+                g.valid_actions()  # 記録時と同じ順で呼ぶ (探索先などの副作用がある)
                 g.step(action)
                 if g.depth != depth:
                     depth = g.depth
@@ -210,9 +256,9 @@ async def ws(sock: WebSocket):
             if not cfg["restart"]:
                 await sock.send_json({"type": "end", "won": g.won, "cause": g.cause, "generation": replay_generation(rec), "difficulty": g.rules.name, "depth": g.depth,
                                       "kills": g.kills, "gold": g.gold, "turn": g.turn, "level": g.level})
-                while not cfg["restart"]:
-                    await asyncio.sleep(0.1)
-            cfg["restart"] = False
+                shown = time.monotonic()
+                while not cfg["restart"] and not (REPLAY_DIR and time.monotonic() - shown > 4.0 and latest_replay() != path):
+                    await asyncio.sleep(0.1)  # ファイル 1 つの再生は R まで止まる。ディレクトリなら次の記録が来しだい移る
 
     task = asyncio.create_task(play_replay() if REPLAY else play())
     try:
