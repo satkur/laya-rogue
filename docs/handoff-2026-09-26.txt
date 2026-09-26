@@ -1,0 +1,59 @@
+laya-rogue 引き継ぎ (2026-09-26 夜。全部 push 済み。詳細は NOTES.md 15 章)
+
+■ 今夜の結論
+- 方針役 (Sonnet) で潜り急ぎはカバーできない (16 シード、単独 7.44 に対して 2 回目 6.31 / 3 回目 4.69 / 4 回目 3.88)
+    旧操縦者の「explore_fully は損」の 2 行を消すと方針役は behind で 9 割 explore_fully を選ぶが、Lv 1〜2 の勇者は探索し切る前に死ぬ
+    tactic=flee は Laya の flee が 0 なので歩き回るだけ。効くのは escape (階段既知) と品物の指示だけ
+- 制約の掛け方の不具合を直した (a14496e): Masked で flee を隠すと Laya は見たことのない選択肢の組に「休憩」を返していた
+    → strategist.decide_within / brain.redraw: 全選択肢で決めさせ、許されない行動なら Laya の分布から引き直す
+- 死因分析 (tools/death_causes.py、32 件): 29 件が HP 90% 以上で最後の戦闘に入り、32 件全部が回復薬ゼロ。
+    浅い階は Lv 1 の命中率 25〜45% と HP 12、深い階は Lv 5〜8 + アクエーターで錆びた鎧 (AC 8〜9)。隣で休んで死亡 5 件
+    命中判定は 32 記録の全 swing で理論どおり (不具合なし)
+- 操縦者の安全弁「攻撃できる敵がいるときは待機しない」(brain.safety_valves、redraw 方式) で 128 シード 6.16 → 6.76〜6.80 (+0.6)。B10F からは 13.02 で変わらず
+
+■ ユーザーが決めたこと (2026-09-26)
+- 指示役の指示を Laya が飲み込む形にする。単純な HP しきい値のルールではなく、指示役が考えて出す「常時命令」を Laya が理解する方向
+- 2 段階で進める (承認済み):
+    A 段 (学習なし): 常時命令の意味は code で固定、いつ出すかは指示役が決める。命令は先に固定命令 (LLM なし、128 シード) で効くかを測ってから語彙に入れる
+    B 段 (学習あり、半日〜1 日): 命令を Laya の状況文に文として書き、learn.py の自己対戦で命令をランダムに切り替えて経験表を作り、train で学ばせる
+- 出来レースを避ける線引き: 指示役が「いつ」を自分で判断し、Laya が「どうやるか」を自分で覚えていること
+- 方針役つきの測定 (1 回 300 万トークン) は効く命令が分かってから
+- 目的関数に答えを書く案 (pace=behind で死の減点を重くする等) は却下のまま
+- 学習の対戦を画面に直結する案は採らない (記録を介す)。再生は「常に最新を後追い」でよい
+- コメントは英語で少なめ。game.py (5.4.4 準拠) 以外は随時リファクタ / simplify してよい。無理な要望は理由付きでスキップ可
+- 画面: 青い帯は使わない (IBM PC 版に青はない)。DOS テーマの枠は灰色、茶色は壁だけ。テーマ名は「xterm 風」
+
+■ 進行中: 固定命令の測定 (data/orders_gen25b.log、21:23 開始、1 条件 30 分)
+    uv run sim.py 128 8000 laya:gen25b laya:gen25b+orders:save_healing laya:gen25b+orders:avoid_rusters laya:gen25b+orders:rest_before_stairs laya:gen25b+orders:save_healing,avoid_rusters,rest_before_stairs
+    続けて --start 10 で なし / 3 つ全部
+  結果 (出た分。残りはログを見る):
+    なし (待機の弁だけ)             6.76 ±0.37 (10 階以上 37、Lv 3.8、撃破 22.0)
+    save_healing                    (待ち)
+    avoid_rusters                   (待ち)
+    rest_before_stairs              (待ち)
+    3 つ全部                        (待ち)
+    B10F なし / 3 つ全部            (待ち)   基準 13.02
+  基準 (待機の弁 + 回復薬 50% の弁、data/valves_gen25b.log): 1 階から 6.80 ±0.38、B10F 13.02 ±0.17
+
+■ 次にやること
+1. 固定命令の結果を NOTES 15 章に書く。効いた命令だけを指示役の語彙に残す (効かない命令は SYSTEM の説明から外す)
+2. 本物の指示役 (llm:sonnet) で 16 シード: uv run sim.py 16 8000 laya:gen25b+llm:sonnet laya:gen25b (約 25 分・300 万トークン)
+   見るもの: 指示役が orders をいつ出すか (llm_<種>.json の history に orders が入る)、到達階 (単独 7.44 と同じゲーム)
+3. B 段: A 段の結果しだいで判断
+4. 未着手の候補: 状況文と経験表キーに AC (3 段階) とアクエーター (錆の特殊攻撃) を入れて learn し直す / HORIZON 40→80
+
+■ 今夜入れたもの (使い方)
+- 常時命令 (A 段): strategist.ORDERS = save_healing (回復薬は HP 50% 未満だけ) / avoid_rusters (アクエーターの隣で休まない・拾わない・探索しない) / rest_before_stairs (HP 90% 未満なら降りない)
+    指示役の JSON の orders に入る。意味は Strategist.order_drops で固定。sim.py の +orders:a,b で固定命令 (LLM なし) を測れる
+- 記録と再生: sim.py が 1 秒ごとに data/replays/<頭脳>_<種>.json を書く (picks = fetch で拾いに行く種類も記録)
+    uv run server.py --replay data/replays --no-open   ← 最新の記録を追いかける。サーバーで 1 本流して全タブに配信、F5 でも途中から
+    記録の再現では g.valid_actions() を記録時と同じ順で呼び、g.pick_kind = picks[i] を入れてから step する (tools/trace_replay.py 参照)
+- tools/trace_replay.py <記録> [N]: 文字で再生 (階ごとの要約・相談・末尾 N 手)。tools/death_causes.py <glob>: 死因の表
+- 画面: テーマ T キー (LAYA ROGUE / DOS 16 色 / CGA 4 色 / xterm 風)。切断されたタブはサーバーが戻ると自動リロード
+    server.py を直したら taskkill /PID <8766 の PID> → uv run server.py --replay data/replays --no-open (python.exe の一括 kill は sim を巻き添え)
+- 退避した記録: data/llm16d/ (3 回目)、data/llm16e/ (4 回目)、data/valves/ (安全弁の基準)。全部 gitignore
+
+■ 運用メモ
+- 長い処理は PowerShell Start-Process で切り離す (Bash ツール 10 分制限)。bash スクリプト冒頭で PATH に /usr/bin。sim の python は優先度 High
+- ファイルは CRLF。Windows パス入り Python は Write でファイルにしてから実行
+- Desktop は Claude Code の permission settings で deny されていて書けない (deny を外す必要がある。allow を足すだけでは通らない)
