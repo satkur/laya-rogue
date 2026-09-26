@@ -456,8 +456,10 @@ def decide_within(brain, g, st):
     """The pilot's decision under the strategist's constraints. The pilot sees all its options and, when its pick is not
     allowed, the action is re-drawn from its own distribution over the allowed ones. Hiding options (Masked) showed the
     pilot option sets it never trained on: with "flee" hidden, Laya rested next to the enemy (NOTES 15)."""
-    allowed = st.allowed(g, g.valid_actions())
-    d = brain.decide(g)
+    g.pick_kind = None  # fetch's pick target must not leak into this turn's options (they are recorded and replayed without it)
+    valid = g.valid_actions()
+    allowed = st.allowed(g, valid)  # may set g.pick_kind for the step
+    d = brain.decide(Masked(g, valid))
     if d["action"] not in allowed:
         probs = {a: p for a, p in d["probs"].items() if a in allowed and p > 0}
         if probs:
