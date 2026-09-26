@@ -14,16 +14,19 @@
     --bg: #070605; --panel: #0d0b08; --frame: #6e562e; --frame-hi: #a88a4c; --sel: #2a1a15;
     --text: #cfc3a3; --dim: #7d7359; --faint: #3a3427; --track: #1a1610;
     --accent: #c4a150; --ok: #6c8c52; --warn: #b78636; --bad: #a23a32;
+    --header-bg: #140e0a; --legend-fg: #120c06; --legend-em: #e8d9a8; --shadow: #050403; --blink: #7a2620; --state: #a3987a; --kbd-fg: #140f08;
+    --glow: rgba(200, 150, 80, .14); --glow-strong: rgba(200, 150, 80, .25);
+    --died-bg: rgba(40, 6, 4, .6); --died-shadow: #2a0806; --won-bg: rgba(30, 24, 6, .6); --won-shadow: #2a2006;
     --font: "DotGothic16", "MS Gothic", "ＭＳ ゴシック", monospace;
   }
   * { box-sizing: border-box; border-radius: 0 !important; }
   html { background: var(--bg); }
   body { margin: 0; min-height: 100vh; padding-bottom: 80px; background: var(--bg); color: var(--text); font: 16px/1.4 var(--font);
-         text-shadow: 0 0 4px rgba(200, 150, 80, .14); -webkit-font-smoothing: none; }
+         text-shadow: 0 0 4px var(--glow); -webkit-font-smoothing: none; }
   body::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 50;
     background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, .62) 100%); }
 
-  header { display: flex; align-items: center; gap: 16px; padding: 3px 12px; background: #140e0a; color: var(--text); border-bottom: 2px solid var(--frame); }
+  header { display: flex; align-items: center; gap: 16px; padding: 3px 12px; background: var(--header-bg); color: var(--text); border-bottom: 2px solid var(--frame); }
   header h1 { font: 400 16px/1.4 var(--font); margin: 0; letter-spacing: .12em; }
   header h1 span { color: var(--accent); }
   header .ver { color: var(--frame-hi); }
@@ -34,20 +37,20 @@
   @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
 
   fieldset { border: 2px solid var(--frame); margin: 0; padding: 6px 10px 10px; min-width: 0; background: var(--panel);
-             box-shadow: 4px 4px 0 #050403; }
-  legend { padding: 0 10px; font-size: 18px; line-height: 1.5; letter-spacing: .1em; color: #120c06; background: var(--frame-hi); text-shadow: none; }
-  legend em { font-style: normal; font-size: 20px; letter-spacing: .06em; background: var(--panel); color: #e8d9a8; padding: 0 10px; margin-left: 10px; border: 1px solid var(--frame); text-shadow: 0 0 4px rgba(200, 150, 80, .25); }
+             box-shadow: 4px 4px 0 var(--shadow); }
+  legend { padding: 0 10px; font-size: 18px; line-height: 1.5; letter-spacing: .1em; color: var(--legend-fg); background: var(--frame-hi); text-shadow: none; }
+  legend em { font-style: normal; font-size: 20px; letter-spacing: .06em; background: var(--panel); color: var(--legend-em); padding: 0 10px; margin-left: 10px; border: 1px solid var(--frame); text-shadow: 0 0 4px var(--glow-strong); }
 
   .stage { position: relative; padding: 4px; }
   canvas { display: block; width: 100%; image-rendering: pixelated; }
-  #died { position: absolute; inset: 4px; display: grid; place-items: center; pointer-events: none; visibility: hidden; background: rgba(40, 6, 4, .6); }
+  #died { position: absolute; inset: 4px; display: grid; place-items: center; pointer-events: none; visibility: hidden; background: var(--died-bg); }
   #died.show { visibility: visible; }
-  #died div { text-align: center; font: 400 72px/1.1 var(--font); letter-spacing: .1em; color: var(--bad); text-shadow: 4px 4px 0 #2a0806; }
+  #died div { text-align: center; font: 400 72px/1.1 var(--font); letter-spacing: .1em; color: var(--bad); text-shadow: 4px 4px 0 var(--died-shadow); }
   #died.show div { animation: blink 0.8s steps(1) infinite; }
-  #died.won { background: rgba(30, 24, 6, .6); }
-  #died.won div { color: var(--accent); text-shadow: 4px 4px 0 #2a2006; animation: none; }
+  #died.won { background: var(--won-bg); }
+  #died.won div { color: var(--accent); text-shadow: 4px 4px 0 var(--won-shadow); animation: none; }
   #died small { display: block; font: 16px/1.6 var(--font); letter-spacing: 0; color: var(--text); text-shadow: 2px 2px 0 #000; margin-top: 12px; animation: none; }
-  @keyframes blink { 50% { color: #7a2620; } }
+  @keyframes blink { 50% { color: var(--blink); } }
 
   aside { display: grid; gap: 12px; }
   .bar { height: 14px; --c: var(--ok); background: repeating-linear-gradient(90deg, var(--track) 0 7px, transparent 7px 9px); margin: 4px 0 8px; }
@@ -59,7 +62,7 @@
   .cell.wide { grid-column: span 2; }
   .cell .k { color: var(--dim); font-size: 14px; }
 
-  #state { color: #a3987a; min-height: 46px; margin-bottom: 6px; }
+  #state { color: var(--state); min-height: 46px; margin-bottom: 6px; }
   #state::before { content: "A>"; color: var(--dim); margin-right: 6px; }
   .act { display: grid; grid-template-columns: 16px 58px 1fr 44px; gap: 6px; align-items: center; padding: 1px 2px; }
   .act .mark { color: var(--accent); }
@@ -84,7 +87,7 @@
   /* 画面下のファンクションキーバー */
   footer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--panel); border-top: 2px solid var(--frame); }
   footer button { font: 16px/1.2 var(--font); background: var(--panel); color: var(--text); border: 0; padding: 2px 10px 2px 0; cursor: pointer; }
-  footer button kbd { font: inherit; background: var(--frame); color: #140f08; padding: 1px 6px; margin-right: 8px; text-shadow: none; }
+  footer button kbd { font: inherit; background: var(--frame); color: var(--kbd-fg); padding: 1px 6px; margin-right: 8px; text-shadow: none; }
   footer button:hover { color: var(--frame-hi); }
   footer button.on { color: var(--accent); }
   footer button.on kbd { background: var(--accent); }
@@ -105,6 +108,7 @@
   #adviser.thinking #reason { color: var(--warn); }
   footer .adviser button { padding: 2px 8px; border: 1px solid var(--faint); margin-left: 12px; }
   footer .adviser button.on { border-color: var(--accent); background: var(--sel); }
+  footer .themes button { padding: 2px 8px; border: 1px solid var(--faint); margin-left: 12px; }
   footer label { display: flex; align-items: center; gap: 8px; color: var(--frame-hi); }
   footer label b { font-weight: 400; color: var(--accent); min-width: 84px; }
   input[type=range] { -webkit-appearance: none; appearance: none; width: 180px; height: 14px; background: repeating-linear-gradient(90deg, var(--faint) 0 4px, transparent 4px 8px); outline: none; }
@@ -181,6 +185,7 @@
   <div class="orders">命令 <span id="orders"></span></div>
   <div class="gens">難易度 <span id="gens"></span></div>
   <div class="adviser"><button id="adviserBtn"><kbd>L</kbd><span>方針役</span></button></div>
+  <div class="themes"><button id="themeBtn"><kbd>T</kbd><span>テーマ</span></button></div>
   <div class="spacer"></div>
   <label>SPEED <input type="range" id="speed" min="0" max="100" value="62"> <b id="speedv"></b></label>
 </footer>
@@ -207,10 +212,78 @@ const ORDER_JP = { cautious: "慎重に", aggressive: "攻めろ", loot: "漁れ
 const scoreOf = h => h.depth * 100 + h.level * 20 + h.gold;
 let order = null, hiscore = 0;
 try { hiscore = +localStorage.getItem("laya-rogue-hiscore") || 0; } catch {}
-const ITEM = { gold: ["*", "#e2c25c"], food: [":", "#c9a87a"], potion: ["!", "#b184c4"], weapon: [")", "#a9b4bd"], armor: ["]", "#a9b4bd"],
-               scroll: ["?", "#d9d4a8"], missile: [")", "#a9b4bd"], bow: [")", "#a9b4bd"], ring: ["=", "#e8c9ff"], stick: ["/", "#c8e0a0"],
-               amulet: [",", "#ffd54a"] };
-const monsterColor = mo => mo.awake ? "#c85a44" : "#8d8a72";   // 眠っている相手はくすんだ色、襲ってくる相手は赤
+const ITEM = { gold: "*", food: ":", potion: "!", weapon: ")", armor: "]", scroll: "?", missile: ")", bow: ")", ring: "=", stick: "/", amulet: "," };
+const monsterColor = mo => mo.awake ? TH.awake : TH.asleep;
+
+// ---------------------------------------------------------------- themes: css overrides :root vars, game colors the canvas. Glow and torch flicker are the same in every theme
+const BOX = { h: "═", v: "║", tl: "╔", tr: "╗", bl: "╚", br: "╝", x: "╬" };
+const ASCII = { h: "-", v: "|", tl: "-", tr: "-", bl: "-", br: "-", x: "-" };
+const THEMES = {
+  laya: { name: "LAYA ROGUE", css: {}, game: {
+    bg: "#000", wallStyle: "brick",
+    wall: [92, 70, 52, 12, 10, 10], wallDark: "#14151a", passage: [52, 46, 40, 6, 6, 6], passageDark: "#0d0d0f", floor: [70, 58, 44, 0, 0, 0], floorDark: "#0b0c0f",
+    sparkle: "255,220,170", stairs: ["#8fc0c4", "#2f4a4c"], door: ["#a9834a", "#3c3020"], trap: "#c46b9a",
+    items: { gold: "#e2c25c", food: "#c9a87a", potion: "#b184c4", weapon: "#a9b4bd", armor: "#a9b4bd", scroll: "#d9d4a8", missile: "#a9b4bd", bow: "#a9b4bd", ring: "#e8c9ff", stick: "#c8e0a0", amulet: "#ffd54a" },
+    awake: "#c85a44", asleep: "#8d8a72", hero: "#f2dc96", heroHit: "#d8563f", heroGlow: "255,180,80", hpBack: "#2a0d0a", hpFill: "#b8433a",
+    dmg: "#d8563f", heal: "#8fbf6a", hit: "#ecd07a", shout: "#ecd07a" } },
+  dos: { name: "DOS 16 色", css: {   // IBM PC Rogue look, CGA 16 colors
+    "--bg": "#000", "--panel": "#000", "--frame": "#aa5500", "--frame-hi": "#ffff55", "--sel": "#0000aa", "--text": "#aaaaaa", "--dim": "#555555", "--faint": "#2c2c2c", "--track": "#1c1c1c",
+    "--accent": "#ffff55", "--ok": "#55ff55", "--warn": "#ffff55", "--bad": "#ff5555", "--header-bg": "#0000aa", "--legend-fg": "#000", "--legend-em": "#ffffff", "--shadow": "#000",
+    "--blink": "#aa0000", "--state": "#aaaaaa", "--kbd-fg": "#000", "--glow": "rgba(255, 255, 85, .14)", "--glow-strong": "rgba(255, 255, 85, .25)",
+    "--died-bg": "rgba(170, 0, 0, .5)", "--died-shadow": "#550000", "--won-bg": "rgba(0, 0, 170, .5)", "--won-shadow": "#000055" }, game: {
+    bg: "#000", wallStyle: "line", box: BOX, passageGlyph: "▒", floorGlyph: "·",
+    wallLit: "#ffff55", wallDark: "#aa5500", passageLit: "#aaaaaa", passageDark: "#555555", floorLit: "#aaaaaa", floorDark: "#555555",
+    stairs: ["#55ff55", "#00aa00"], door: ["#ffff55", "#aa5500"], trap: "#ff55ff",
+    items: { gold: "#ffff55", food: "#ff5555", potion: "#ff55ff", weapon: "#ffffff", armor: "#ffffff", scroll: "#55ffff", missile: "#ffffff", bow: "#ffffff", ring: "#ff55ff", stick: "#55ff55", amulet: "#ffff55" },
+    awake: "#ff5555", asleep: "#aaaaaa", hero: "#ffff55", heroHit: "#ff5555", heroGlow: "255,255,85", hpBack: "#550000", hpFill: "#ff5555",
+    dmg: "#ff5555", heal: "#55ff55", hit: "#ffff55", shout: "#ffffff" } },
+  cga: { name: "CGA 4 色", css: {     // CGA palette 1 (cyan / magenta / white), darker shades only for backgrounds
+    "--bg": "#000", "--panel": "#000", "--frame": "#ff55ff", "--frame-hi": "#ffffff", "--sel": "#2a002a", "--text": "#55ffff", "--dim": "#a03aa0", "--faint": "#402040", "--track": "#201020",
+    "--accent": "#ffffff", "--ok": "#55ffff", "--warn": "#ffffff", "--bad": "#ff55ff", "--header-bg": "#000", "--legend-fg": "#000", "--legend-em": "#ffffff", "--shadow": "#000",
+    "--blink": "#aa00aa", "--state": "#55ffff", "--kbd-fg": "#000", "--glow": "rgba(85, 255, 255, .16)", "--glow-strong": "rgba(255, 85, 255, .3)",
+    "--died-bg": "rgba(120, 0, 120, .5)", "--died-shadow": "#550055", "--won-bg": "rgba(0, 120, 120, .5)", "--won-shadow": "#005555" }, game: {
+    bg: "#000", wallStyle: "line", box: BOX, passageGlyph: "▒", floorGlyph: "·",
+    wallLit: "#ff55ff", wallDark: "#7a2a7a", passageLit: "#55ffff", passageDark: "#2a6a6a", floorLit: "#55ffff", floorDark: "#2a6a6a",
+    stairs: ["#ffffff", "#7a7a7a"], door: ["#ffffff", "#7a2a7a"], trap: "#ff55ff",
+    items: { gold: "#ffffff", food: "#55ffff", potion: "#ff55ff", weapon: "#55ffff", armor: "#55ffff", scroll: "#ffffff", missile: "#55ffff", bow: "#55ffff", ring: "#ff55ff", stick: "#55ffff", amulet: "#ffffff" },
+    awake: "#ff55ff", asleep: "#7a2a7a", hero: "#ffffff", heroHit: "#ff55ff", heroGlow: "85,255,255", hpBack: "#3a003a", hpFill: "#ff55ff",
+    dmg: "#ff55ff", heal: "#55ffff", hit: "#ffffff", shout: "#ffffff" } },
+  ansi: { name: "端末 16 色", css: {  // ANSI 16-color terminal roguelike look
+    "--bg": "#000", "--panel": "#000", "--frame": "#808080", "--frame-hi": "#ffffff", "--sel": "#000080", "--text": "#c0c0c0", "--dim": "#808080", "--faint": "#333333", "--track": "#222222",
+    "--accent": "#ffff55", "--ok": "#55ff55", "--warn": "#ffff55", "--bad": "#ff5555", "--header-bg": "#000080", "--legend-fg": "#000", "--legend-em": "#ffffff", "--shadow": "#000",
+    "--blink": "#800000", "--state": "#c0c0c0", "--kbd-fg": "#000", "--glow": "rgba(192, 192, 192, .12)", "--glow-strong": "rgba(255, 255, 85, .25)",
+    "--died-bg": "rgba(128, 0, 0, .5)", "--died-shadow": "#400000", "--won-bg": "rgba(0, 0, 128, .5)", "--won-shadow": "#000040" }, game: {
+    bg: "#000", wallStyle: "line", box: ASCII, passageGlyph: "#", floorGlyph: ".",
+    wallLit: "#ffffff", wallDark: "#808080", passageLit: "#c0c0c0", passageDark: "#606060", floorLit: "#c0c0c0", floorDark: "#505050",
+    stairs: ["#ffffff", "#808080"], door: ["#ffff55", "#808000"], trap: "#ff55ff",
+    items: { gold: "#ffff55", food: "#aa5500", potion: "#ff55ff", weapon: "#55ffff", armor: "#c0c0c0", scroll: "#ffffff", missile: "#55ffff", bow: "#55ffff", ring: "#55ffff", stick: "#55ff55", amulet: "#ffff55" },
+    awake: "#ff5555", asleep: "#5555ff", hero: "#ffffff", heroHit: "#ff5555", heroGlow: "255,255,255", hpBack: "#400000", hpFill: "#ff5555",
+    dmg: "#ff5555", heal: "#55ff55", hit: "#ffff55", shout: "#ffff55" } },
+};
+const THEME_ORDER = Object.keys(THEMES);
+let themeName = "laya", TH = THEMES.laya.game;
+try { themeName = THEMES[localStorage.getItem("laya-rogue-theme")] ? localStorage.getItem("laya-rogue-theme") : "laya"; } catch {}
+function applyTheme(name) {
+  themeName = THEMES[name] ? name : "laya"; TH = THEMES[themeName].game;
+  const st = document.documentElement.style;
+  for (const t of Object.values(THEMES)) for (const k of Object.keys(t.css)) st.removeProperty(k);
+  for (const [k, v] of Object.entries(THEMES[themeName].css)) st.setProperty(k, v);
+  $("themeBtn").querySelector("span").textContent = `テーマ ${THEMES[themeName].name}`;
+  try { localStorage.setItem("laya-rogue-theme", themeName); } catch {}
+}
+const shade = (hex, k) => `rgb(${[1, 3, 5].map(i => Math.round(parseInt(hex.slice(i, i + 2), 16) * k)).join(",")})`;
+const litRGB = (c, b) => `rgb(${c[0] * b + c[3]},${c[1] * b + c[4]},${c[2] * b + c[5]})`;
+function wallGlyph(x, y) {                // box-drawing piece from the neighboring walls (doors count as wall)
+  const W_ = (x, y) => { const t = tiles[y]?.[x]; return t === 5 || t === 4; };
+  const l = W_(x - 1, y), r = W_(x + 1, y), u = W_(x, y - 1), d = W_(x, y + 1), B = TH.box;
+  if ((l || r) && !(u || d)) return B.h;
+  if ((u || d) && !(l || r)) return B.v;
+  if (r && d && !l && !u) return B.tl;
+  if (l && d && !r && !u) return B.tr;
+  if (r && u && !l && !d) return B.bl;
+  if (l && u && !r && !d) return B.br;
+  return B.x;
+}
 const VIEW_W = 50;                                                // 横 80 マスのうち、勇者を中心にこの幅だけ映す
 let camX = 0;
 const FONT = '"DotGothic16", "MS Gothic", monospace';
@@ -225,7 +298,10 @@ const genLabel = g => g ?? "未学習";
 // ---------------------------------------------------------------- websocket
 const ws = new WebSocket(`ws://${location.host}/ws`);
 const send = o => ws.readyState === 1 && ws.send(JSON.stringify(o));
-ws.onclose = () => { $("device").textContent = "切断されました（server.py を再起動してください）"; };
+ws.onclose = () => {                       // server restarted (new code) or stopped: reload once it answers again
+  $("device").textContent = "切断: サーバーの再起動を待っています…";
+  const probe = setInterval(() => fetch("/", { cache: "no-store" }).then(r => { if (r.ok) { clearInterval(probe); location.reload(); } }).catch(() => {}), 1000);
+};
 ws.onmessage = ev => {
   const m = JSON.parse(ev.data);
   if (m.type === "hello") { GW = m.w; GH = m.h; $("device").textContent = m.replay ? `再生: ${m.replay}` : ""; resize(); pushConfig(); generation = m.generation; $("genNow").textContent = genLabel(generation); setupDifficulties(m.difficulties, m.difficulty); setupOrders(m.orders, m.order); setAdviser(m.adviser); }
@@ -276,7 +352,7 @@ function onAdvice(m) {
   else {
     $("reason").textContent = `${TRIGGER_JP[m.kind] ?? m.kind}: ${m.reason} (${m.sec}秒)`;
     el.textContent = `方針役「${m.reason}」`;
-    if (hero) floats.push({ x: hero.x, y: hero.y - 1, text: `「${PLAN_JP[m.plan] ?? m.plan}」`, c: "#ecd07a", life: 1.4, vy: -0.7 });
+    if (hero) floats.push({ x: hero.x, y: hero.y - 1, text: `「${PLAN_JP[m.plan] ?? m.plan}」`, c: TH.shout, life: 1.4, vy: -0.7 });
   }
   el.style.color = "var(--accent)";
   $("log").appendChild(el);
@@ -297,7 +373,7 @@ function setOrder(name, shout) {
   order = name;
   for (const b of $("orders").children) b.classList.toggle("on", b.dataset.order === name);
   $("order").textContent = ORDER_JP[name] ?? name;
-  if (shout && hero) floats.push({ x: hero.x, y: hero.y - 1, text: `「${ORDER_JP[name]}！」`, c: "#ecd07a", life: 1.1, vy: -0.9 });
+  if (shout && hero) floats.push({ x: hero.x, y: hero.y - 1, text: `「${ORDER_JP[name]}！」`, c: TH.shout, life: 1.1, vy: -0.9 });
 }
 function setupDifficulties(list, current) {
   $("gens").innerHTML = "";
@@ -332,11 +408,13 @@ $("pause").onclick = () => { paused = !paused; $("pause").classList.toggle("on",
 $("step").onclick = () => { if (!paused) $("pause").onclick(); send({ type: "step" }); };
 $("restart").onclick = () => send({ type: "restart" });
 $("adviserBtn").onclick = () => send({ type: "adviser", enabled: !(adviser?.enabled && !adviser?.stopped) });
+$("themeBtn").onclick = () => applyTheme(THEME_ORDER[(THEME_ORDER.indexOf(themeName) + 1) % THEME_ORDER.length]);
 addEventListener("keydown", e => {
   if (e.code === "Space") { e.preventDefault(); $("pause").onclick(); }
   else if (e.key === ".") $("step").onclick();
   else if (e.key === "r" || e.key === "R") $("restart").onclick();
   else if (e.key === "l" || e.key === "L") $("adviserBtn").onclick();
+  else if (e.key === "t" || e.key === "T") $("themeBtn").onclick();
   else if ("1234".includes(e.key)) $("orders").children[+e.key - 1]?.click();
 });
 
@@ -348,18 +426,18 @@ function onFrame(m) {
   lit = new Set(m.visible.map(([x, y]) => y * GW + x));
   items = m.items; traps = m.traps ?? [];
 
-  if (hero && m.hero.hp < hero.hp) { floats.push({ x: m.hero.x, y: m.hero.y, text: "-" + (hero.hp - m.hero.hp), c: "#d8563f", life: 0.7 }); flash = 1; }
-  if (hero && m.hero.hp > hero.hp + 2) floats.push({ x: m.hero.x, y: m.hero.y, text: "+" + (m.hero.hp - hero.hp), c: "#8fbf6a", life: 0.8 });
+  if (hero && m.hero.hp < hero.hp) { floats.push({ x: m.hero.x, y: m.hero.y, text: "-" + (hero.hp - m.hero.hp), c: TH.dmg, life: 0.7 }); flash = 1; }
+  if (hero && m.hero.hp > hero.hp + 2) floats.push({ x: m.hero.x, y: m.hero.y, text: "+" + (m.hero.hp - hero.hp), c: TH.heal, life: 0.8 });
   const seenIds = new Set();
   for (const mo of m.monsters) {
     seenIds.add(mo.id);
     const old = monsters.get(mo.id);
-    if (old && mo.hp < old.hp) floats.push({ x: mo.x, y: mo.y, text: "-" + (old.hp - mo.hp), c: "#ecd07a", life: 0.6 });
+    if (old && mo.hp < old.hp) floats.push({ x: mo.x, y: mo.y, text: "-" + (old.hp - mo.hp), c: TH.hit, life: 0.6 });
     monsters.set(mo.id, { ...mo, dx: old ? old.dx : mo.x, dy: old ? old.dy : mo.y });
   }
   for (const [id, old] of monsters) if (!seenIds.has(id)) {
     if (Math.max(Math.abs(old.x - m.hero.x), Math.abs(old.y - m.hero.y)) <= 1 && m.decision.action === "attack")
-      for (let k = 0; k < 10; k++) floats.push({ x: old.x, y: old.y, vx: (Math.random() - .5) * 5, vy: (Math.random() - .5) * 5, text: "·", c: "#c85a44", life: 0.45 });
+      for (let k = 0; k < 10; k++) floats.push({ x: old.x, y: old.y, vx: (Math.random() - .5) * 5, vy: (Math.random() - .5) * 5, text: "·", c: TH.awake, life: 0.45 });
     monsters.delete(id);
   }
   hero = m.hero;
@@ -421,7 +499,7 @@ let prev = performance.now();
 function draw(now) {
   const dt = Math.min(.05, (now - prev) / 1000); prev = now;
   g.save();
-  g.fillStyle = "#000"; g.fillRect(-T, 0, T * (VIEW_W + 2), T * GH);
+  g.fillStyle = TH.bg; g.fillRect(-T, 0, T * (VIEW_W + 2), T * GH);
   if (heroDraw) camX += (Math.max(0, Math.min(GW - VIEW_W, heroDraw.x - VIEW_W / 2)) - camX) * Math.min(1, dt * 6);
   g.translate(-camX * T, 0);
   if (shake > 0) { shake = Math.max(0, shake - dt * 2); g.translate((Math.random() - .5) * 14 * shake, (Math.random() - .5) * 14 * shake); }
@@ -437,30 +515,37 @@ function draw(now) {
       const dist = Math.hypot(x - heroDraw.x, y - heroDraw.y);
       const b = isLit ? Math.max(.18, (1 - dist / 9.5)) * flick : 0.1;
       const wall = t === 5, passage = t === 3;
-      if (wall) g.fillStyle = isLit ? `rgb(${92 * b + 12},${70 * b + 10},${52 * b + 10})` : "#14151a";
-      else if (passage) g.fillStyle = isLit ? `rgb(${52 * b + 6},${46 * b + 6},${40 * b + 6})` : "#0d0d0f";
-      else g.fillStyle = isLit ? `rgb(${70 * b},${58 * b},${44 * b})` : "#0b0c0f";
-      g.fillRect(x * T, y * T, T, T);
-      if (wall) {                           // レンガ目地。照明色の上に暗い線を重ねるだけなので明るさは保たれる
-        g.fillStyle = "rgba(0,0,0,.34)";
-        g.fillRect(x * T, y * T + T - 2, T, 2); g.fillRect(x * T, y * T + (T >> 1) - 1, T, 2);
-        g.fillRect(x * T + (T >> 1), y * T, 2, T >> 1); g.fillRect(x * T, y * T + (T >> 1), 2, T >> 1);
-      } else if (isLit && !passage) { g.fillStyle = `rgba(255,220,170,${.12 * b})`; g.fillRect(x * T + (T >> 1) - 1, y * T + (T >> 1) - 1, 2, 2); }
-      if (t === 2) glyph(">", x, y, isLit ? "#8fc0c4" : "#2f4a4c", isLit);
-      if (t === 4) glyph("+", x, y, isLit ? "#a9834a" : "#3c3020", false);
+      if (TH.wallStyle === "brick") {
+        if (wall) g.fillStyle = isLit ? litRGB(TH.wall, b) : TH.wallDark;
+        else if (passage) g.fillStyle = isLit ? litRGB(TH.passage, b) : TH.passageDark;
+        else g.fillStyle = isLit ? litRGB(TH.floor, b) : TH.floorDark;
+        g.fillRect(x * T, y * T, T, T);
+        if (wall) {                         // レンガ目地。照明色の上に暗い線を重ねるだけなので明るさは保たれる
+          g.fillStyle = "rgba(0,0,0,.34)";
+          g.fillRect(x * T, y * T + T - 2, T, 2); g.fillRect(x * T, y * T + (T >> 1) - 1, T, 2);
+          g.fillRect(x * T + (T >> 1), y * T, 2, T >> 1); g.fillRect(x * T, y * T + (T >> 1), 2, T >> 1);
+        } else if (isLit && !passage) { g.fillStyle = `rgba(${TH.sparkle},${.12 * b})`; g.fillRect(x * T + (T >> 1) - 1, y * T + (T >> 1) - 1, 2, 2); }
+      } else {                              // line walls, dimmed by torch distance (flicker included)
+        const k = .45 + .55 * b;
+        if (wall) glyph(wallGlyph(x, y), x, y, isLit ? shade(TH.wallLit, k) : TH.wallDark, isLit);
+        else if (passage) glyph(TH.passageGlyph, x, y, isLit ? shade(TH.passageLit, k) : TH.passageDark, false);
+        else if (t !== 2 && t !== 4) glyph(TH.floorGlyph, x, y, isLit ? shade(TH.floorLit, k) : TH.floorDark, false);
+      }
+      if (t === 2) glyph(">", x, y, isLit ? TH.stairs[0] : TH.stairs[1], isLit);
+      if (t === 4) glyph("+", x, y, isLit ? TH.door[0] : TH.door[1], false);
     }
-    for (const t of traps) glyph("^", t.x, t.y, "#c46b9a", true);
-    for (const it of items) glyph(ITEM[it.kind][0], it.x, it.y, ITEM[it.kind][1], true);
+    for (const t of traps) glyph("^", t.x, t.y, TH.trap, true);
+    for (const it of items) glyph(ITEM[it.kind], it.x, it.y, TH.items[it.kind], true);
     for (const mo of monsters.values()) {
       mo.dx += (mo.x - mo.dx) * k; mo.dy += (mo.y - mo.dy) * k;
       glyph(mo.ch, mo.dx, mo.dy, monsterColor(mo), mo.awake);
-      if (mo.hp < mo.max_hp) { g.fillStyle = "#2a0d0a"; g.fillRect(mo.dx * T + 2, mo.dy * T - 3, T - 4, 3); g.fillStyle = "#b8433a"; g.fillRect(mo.dx * T + 2, mo.dy * T - 3, (T - 4) * mo.hp / mo.max_hp, 3); }
+      if (mo.hp < mo.max_hp) { g.fillStyle = TH.hpBack; g.fillRect(mo.dx * T + 2, mo.dy * T - 3, T - 4, 3); g.fillStyle = TH.hpFill; g.fillRect(mo.dx * T + 2, mo.dy * T - 3, (T - 4) * mo.hp / mo.max_hp, 3); }
     }
     const hx = heroDraw.x * T + T / 2, hy = heroDraw.y * T + T / 2;
     const glow = g.createRadialGradient(hx, hy, 0, hx, hy, T * 5);
-    glow.addColorStop(0, "rgba(255,180,80,.20)"); glow.addColorStop(1, "rgba(255,180,80,0)");
+    glow.addColorStop(0, `rgba(${TH.heroGlow},.20)`); glow.addColorStop(1, `rgba(${TH.heroGlow},0)`);
     g.fillStyle = glow; g.fillRect(hx - T * 5, hy - T * 5, T * 10, T * 10);
-    glyph("@", heroDraw.x, heroDraw.y, flash > 0 ? "#d8563f" : "#f2dc96", true, true);
+    glyph("@", heroDraw.x, heroDraw.y, flash > 0 ? TH.heroHit : TH.hero, true, true);
     flash = Math.max(0, flash - dt * 5);
   }
   for (let i = floats.length - 1; i >= 0; i--) {
@@ -485,6 +570,7 @@ function glyph(ch, x, y, color, bright, bold) {
   g.fillStyle = color; g.fillText(ch, x * T + T / 2, y * T + T / 2);
   g.shadowBlur = 0; g.textBaseline = "alphabetic";
 }
+applyTheme(themeName);
 resize();
 requestAnimationFrame(draw);
 </script>
