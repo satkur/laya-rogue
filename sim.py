@@ -3,6 +3,8 @@
     uv run sim.py [回数] [最大ターン] [頭脳...] [--seeds 5003,5007] [--start 10] [--difficulty normal|hard|original]
 
 --seeds を付けると回数の代わりにそのシードだけを回す。頭脳ごとの 1 回ずつの結果は data/results_<頭脳>.json に残る
+各ゲームの行動列と方針役の相談は data/replays/<頭脳>_<種>[_B<開始階>][_<難易度>].json に残る (50 手ごとに書き出す)。
+`uv run server.py --replay data/replays/<ファイル>` で画面に再生できる (回している最中のゲームも追いかけられる)。ゲームは種と行動列から再現するので、記録したときのコードで再生すること
 (normal 以外は results_<頭脳>_<難易度>.json)。--difficulty の既定は normal (NOTES.md 15 章)。
 
 頭脳: random / rules / diver / table:<ラウンド> / laya (未学習) / laya:<世代名>
@@ -106,8 +108,28 @@ def standard_hero(depth):
 STALL_TURNS, STALL_TILES = 300, 4  # この連続ターン数のあいだ踏んだマスが STALL_TILES 種類以下で、休憩も戦闘もしておらず、起きた敵も見えていなければ「行き詰まり」
 
 
+REPLAYS = DATA / "replays"
+REPLAY_FLUSH = 50  # この手数ごとに記録を書き出す (再生側が追いかけられるように)
+
+
+def replay_path(name, seed, start=None, difficulty="normal"):
+    safe = name.replace("/", "-").replace(":", "-")
+    return REPLAYS / f"{safe}_{seed}{f'_B{start}' if start else ''}{'' if difficulty == 'normal' else '_' + difficulty}.json"
+
+
+def save_replay(path, rec):
+    """記録を書き出す (仮ファイルに書いてから置き換えるので、再生側が途中の状態を読むことはない)。"""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)
+
+
 def play(brain, seed, max_turns, start=None, difficulty="normal"):
     g = Game(seed, standard_hero(start) if start else None, difficulty)
+    rec = {"brain": getattr(brain, "name", "?"), "seed": seed, "start": start, "difficulty": difficulty, "actions": [], "advice": [], "done": False}
+    rpath = replay_path(rec["brain"], seed, start, difficulty)
     if hasattr(brain, "rng"):  # 行動を引く乱数もゲームごとにシードで決める。共有したままだと同じ重みでも並べる順で結果が変わる
         brain.rng = random.Random(seed)
     g.action_rng = random.Random(seed)  # Laya はこちらを使う。方針役つき (Guided / Locked 越しで brain.rng が付かず、4 ゲームが 1 つの Laya を共有) でも単独と同じゲームになる (NOTES 15 章)
@@ -115,6 +137,8 @@ def play(brain, seed, max_turns, start=None, difficulty="normal"):
     stalls, trail, acts, stall_depth = [], [], [], 0  # 行き詰まり: 敵もいないのに数マスを往復し続ける (NOTES 13 章)
     while not g.over and g.turn < max_turns:
         d = brain.decide(g)
+        if d.get("advice"):  # 方針役の相談 (Guided)。i はこの相談の直後に取った行動の番号
+            rec["advice"].append({"i": len(rec["actions"]), "turn": g.turn, **{k: v for k, v in d["advice"].items() if k != "valid"}})
         n += 1
         miss += d.get("miss", False)
         if d["ms"]:
@@ -122,12 +146,17 @@ def play(brain, seed, max_turns, start=None, difficulty="normal"):
         trail.append((g.depth, g.hx, g.hy))
         acts.append(d["action"])
         g.step(d["action"])
+        rec["actions"].append(d["action"])
+        if len(rec["actions"]) % REPLAY_FLUSH == 0:
+            save_replay(rpath, rec)
         g.log.clear()
         if (len(trail) >= STALL_TURNS and stall_depth != g.depth and len(set(trail[-STALL_TURNS:])) <= STALL_TILES
                 and not ({"rest", "attack", "throw"} & set(acts[-STALL_TURNS:])) and not any(m["awake"] for m in g.visible_monsters())):
             stalls.append([g.depth, g.turn])
             stall_depth = g.depth  # 同じ階では 1 回だけ記録
     end = ("帰還" if g.rules.amulet else "到達") if g.won else g.cause if g.dead else "時間切れ"
+    rec["done"], rec["result"] = True, dict(depth=g.max_depth, level=g.level, kills=g.kills, gold=g.gold, turn=g.turn, end=end, final_depth=g.depth)
+    save_replay(rpath, rec)
     return dict(depth=g.max_depth, level=g.level, kills=g.kills, gold=g.gold, turn=g.turn, end=end, ms=ms, miss=miss / max(1, n), stalls=stalls,
                 amulet=g.amulet, final_depth=g.depth)
 

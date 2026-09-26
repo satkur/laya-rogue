@@ -6,8 +6,11 @@
     uv run server.py --llm-model sonnet
     uv run server.py --gen gen22    # 世代を指定 (既定は DEFAULT_GENERATION = 測定済みの最良)。画面からは替えない
     uv run server.py --difficulty original   # 難易度 (既定 normal)。画面からも切り替えられる (NOTES.md 15 章)
+    uv run server.py --replay data/replays/laya-gen25b_5004.json   # sim.py / learn.py が残した記録を再生する (Laya も方針役も呼ばない。
+                                             # 回している最中の記録は末尾を追いかける。R で最初から。難易度と方針役の切替は効かない)
 """
 import asyncio
+import json
 import sys
 import webbrowser
 from contextlib import asynccontextmanager
@@ -21,6 +24,7 @@ import rogue_data as D
 from brain import WEIGHTS, LayaBrain
 from game import H, W, Game
 import strategist as strategist_mod
+from sim import standard_hero
 from strategist import DEFAULT_MODEL, Masked, Strategist
 
 HOST, PORT = "127.0.0.1", 8766
@@ -31,6 +35,8 @@ DEFAULT_GENERATION = "gen25"  # 既定は「測定済みの最良」を固定 (w
 GENERATION = sys.argv[sys.argv.index("--gen") + 1] if "--gen" in sys.argv else DEFAULT_GENERATION
 DIFFICULTY = sys.argv[sys.argv.index("--difficulty") + 1] if "--difficulty" in sys.argv else "normal"
 D.rules(DIFFICULTY)  # 名前の検査
+REPLAY = Path(sys.argv[sys.argv.index("--replay") + 1]) if "--replay" in sys.argv else None
+replay_state = {"enabled": False, "model": "", "stopped": None, "calls": 0, "plan": "free", "rest": False, "tactic": "free", "fetch": "none"}  # 再生中の方針役の表示
 adviser = Strategist(model=LLM_MODEL, enabled="--llm" in sys.argv)  # いまは付けると成績が下がるので既定は切 (NOTES.md 6 章)
 strategist_mod.MAX_CALLS_TOTAL = 300  # 画面を開きっぱなしにしても、ここで方針役は自動で止まる (画面で入れ直すと再開)
 
@@ -44,14 +50,19 @@ def generations():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global brain
-    print(f"Laya を読み込み中... (難易度 {DIFFICULTY.upper()})", flush=True)
-    gens = generations()
-    brain = LayaBrain(GENERATION if GENERATION in gens else (gens[-1] if gens else None))
-    g = Game(0)
-    for _ in range(5):  # 初回の CUDA カーネル準備を済ませておく
-        g.step(brain.decide(g)["action"])
     url = f"http://{HOST}:{PORT}/"
-    print(f"準備完了: {brain.agent.device} / 世代 {brain.generation or '未学習'}\n  → {url}", flush=True)
+    if REPLAY:
+        rec = load_replay()
+        replay_state.update(enabled=bool(rec["advice"]), model=rec["brain"])
+        print(f"再生: {REPLAY} ({rec['brain']}, 種 {rec['seed']}, {len(rec['actions'])} 手{'' if rec.get('done') else '、記録中'})\n  → {url}", flush=True)
+    else:
+        print(f"Laya を読み込み中... (難易度 {DIFFICULTY.upper()})", flush=True)
+        gens = generations()
+        brain = LayaBrain(GENERATION if GENERATION in gens else (gens[-1] if gens else None))
+        g = Game(0)
+        for _ in range(5):  # 初回の CUDA カーネル準備を済ませておく
+            g.step(brain.decide(g)["action"])
+        print(f"準備完了: {brain.agent.device} / 世代 {brain.generation or '未学習'}\n  → {url}", flush=True)
     if "--no-open" not in sys.argv:
         webbrowser.open(url)
     yield
@@ -65,7 +76,13 @@ async def index():
     return FileResponse(STATIC / "index.html")
 
 
+def load_replay():
+    return json.loads(REPLAY.read_text(encoding="utf-8"))
+
+
 def adviser_state():
+    if REPLAY:
+        return dict(replay_state)
     return {"enabled": adviser.enabled, "model": adviser.model, "stopped": adviser.stopped, "calls": adviser.calls,
             "plan": adviser.plan, "rest": adviser.rest, "tactic": adviser.tactic, "fetch": adviser.fetch}
 
@@ -100,8 +117,9 @@ def frame(g, d, log_from):
 async def ws(sock: WebSocket):
     await sock.accept()
     cfg = {"delay": 0.119, "paused": False, "step": False, "restart": False}
-    await sock.send_json({"type": "hello", "w": W, "h": H, "generation": brain.generation,
-                          "difficulties": list(D.DIFFICULTIES), "difficulty": DIFFICULTY,
+    await sock.send_json({"type": "hello", "w": W, "h": H, "generation": load_replay()["brain"] if REPLAY else brain.generation,
+                          "difficulties": list(D.DIFFICULTIES), "difficulty": load_replay().get("difficulty", "normal") if REPLAY else DIFFICULTY,
+                          "replay": REPLAY.name if REPLAY else None,
                           "orders": [], "order": None,  # 命令はいったん外してある
                           "adviser": adviser_state()})
 
@@ -144,10 +162,58 @@ async def ws(sock: WebSocket):
                 await asyncio.sleep(3.0)
             cfg["restart"] = False
 
-    task = asyncio.create_task(play())
+    async def play_replay():
+        """記録を再生する。記録がまだ書かれている最中なら末尾で待って追いかける。終わったら R まで止まる。"""
+        while True:
+            rec = load_replay()
+            g = Game(rec["seed"], standard_hero(rec["start"]) if rec.get("start") else None, rec.get("difficulty", "normal"))
+            g.say(f"再生: {REPLAY.name} ({rec['brain']}, 地図の種 {g.seed})")
+            replay_state.update(enabled=bool(rec["advice"]), model=rec["brain"], calls=0, plan="free", rest=False, tactic="free", fetch="none")
+            advice_at = {a["i"]: a for a in rec["advice"]}
+            depth, log_from, i = g.depth, 0, 0
+            await sock.send_json({"type": "floor", "depth": depth})
+            await sock.send_json(frame(g, {"action": None, "probs": {}, "state": "", "ms": 0.0}, log_from))
+            g.newly_seen = []
+            log_from = len(g.log)
+            while not g.over and not cfg["restart"]:
+                while cfg["paused"] and not cfg["step"] and not cfg["restart"]:
+                    await asyncio.sleep(0.03)
+                cfg["step"] = False
+                if i >= len(rec["actions"]):
+                    if rec.get("done"):
+                        break
+                    await asyncio.sleep(1.0)  # まだ記録中: 追いつくまで待つ
+                    rec = load_replay()
+                    advice_at = {a["i"]: a for a in rec["advice"]}
+                    continue
+                a = advice_at.get(i)
+                if a:
+                    replay_state.update(calls=replay_state["calls"] + 1, **{k: a[k] for k in ("plan", "rest", "tactic", "fetch") if k in a})
+                    await sock.send_json({"type": "advice", **a, "adviser": adviser_state()})
+                action = rec["actions"][i]
+                i += 1
+                d = {"action": action, "probs": {action: 1.0}, "state": "", "ms": 0.0}
+                g.step(action)
+                if g.depth != depth:
+                    depth = g.depth
+                    await sock.send_json({"type": "floor", "depth": depth})
+                await sock.send_json(frame(g, d, log_from))
+                g.newly_seen = []
+                log_from = len(g.log)
+                await asyncio.sleep(cfg["delay"])
+            if not cfg["restart"]:
+                await sock.send_json({"type": "end", "won": g.won, "cause": g.cause, "generation": rec["brain"], "difficulty": g.rules.name, "depth": g.depth,
+                                      "kills": g.kills, "gold": g.gold, "turn": g.turn, "level": g.level})
+                while not cfg["restart"]:
+                    await asyncio.sleep(0.1)
+            cfg["restart"] = False
+
+    task = asyncio.create_task(play_replay() if REPLAY else play())
     try:
         while True:
             m = await sock.receive_json()
+            if REPLAY and m["type"] in ("adviser", "difficulty"):  # 再生中は方針役と難易度の切替は効かない
+                continue
             if m["type"] == "config":
                 cfg["delay"] = max(0.0, min(1.0, float(m.get("delay", cfg["delay"]))))
                 cfg["paused"] = bool(m.get("paused", cfg["paused"]))

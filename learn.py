@@ -195,12 +195,16 @@ def _init(table, v_default, base):
     _table, _v_default, _base = table, v_default, base
 
 
+LEARN_REPLAYS = 4  # 1 ラウンドにつき、1 階から始めた最初のこの数のゲームを data/replays/table-r<ラウンド>_<n>.json に残す (server.py --replay で再生)
+
+
 def episode(args):
     """1 回潜り、調べた局面ごとの (粗いキー, 状況文, {行動: 平均リターン}) と、階に着いた時点の勇者の状態を返す。"""
-    seed, start, difficulty = args
+    seed, start, difficulty, record = args
     rng = random.Random(seed)
     g = Game(rng.randrange(1 << 30), start, difficulty)
     out, arrivals, depth = [], [], g.depth
+    actions = [] if record else None
     turns = 0
     while not g.over and turns < MAX_TURNS:
         turns += 1
@@ -213,11 +217,19 @@ def episode(args):
             # 行動どうしの比較では同じ乱数列を使う。「運の差」が消えて「行動の差」だけが残る
             seeds = [rng.random() for _ in range(ROLLOUTS)]
             out.append((key, describe(g, valid), {a: sum(rollout(g, a, _table, _v_default, s) for s in seeds) / ROLLOUTS for a in valid}))
-        g.step(pick(_table, key, valid, rng, TAU, EPSILON))
+        a = pick(_table, key, valid, rng, TAU, EPSILON)
+        g.step(a)
+        if actions is not None:
+            actions.append(a)
         g.log.clear()
         if g.depth != depth and not g.over:
             depth = g.depth
             arrivals.append(g.hero_state())
+    if record:
+        from sim import save_replay
+
+        save_replay(record["path"], {"brain": record["brain"], "seed": g.seed, "start": None, "difficulty": difficulty, "actions": actions, "advice": [], "done": True,
+                                     "result": dict(depth=g.max_depth, level=g.level, kills=g.kills, turn=g.turn, end=g.cause if g.dead else "打ち切り")})
     return out, arrivals, g.depth, g.dead, start is None
 
 
@@ -257,10 +269,16 @@ def main():
         known = [(value(table, k, list(e["q"]), base), min(v[1] for v in e["q"].values())) for k, e in table.items()]
         known = [(v, w) for v, w in known if v is not None]
         v_default = sum(v * w for v, w in known) / sum(w for _, w in known) if known else 0.0
-        jobs = []
+        jobs, recorded = [], 0
         for i in range(episodes):
             start = rng.choice(pool[rng.choice(list(pool))]) if pool and rng.random() < P_CONTINUE else None
-            jobs.append((r * 1_000_003 + i, start, difficulty))
+            record = None
+            if start is None and recorded < LEARN_REPLAYS:
+                from sim import REPLAYS
+
+                recorded += 1
+                record = {"path": str(REPLAYS / f"table-r{r}_{recorded}.json"), "brain": f"table:r{r}"}
+            jobs.append((r * 1_000_003 + i, start, difficulty, record))
         with ProcessPoolExecutor(max_workers=max(1, (os.cpu_count() or 4) - 2), initializer=_init, initargs=(table, v_default, base)) as pool_exec:
             results = list(pool_exec.map(episode, jobs, chunksize=2))
         n_eval, fresh_depths, deepest = 0, [], 0
