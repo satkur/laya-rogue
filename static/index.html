@@ -228,7 +228,7 @@ const send = o => ws.readyState === 1 && ws.send(JSON.stringify(o));
 ws.onclose = () => { $("device").textContent = "切断されました（server.py を再起動してください）"; };
 ws.onmessage = ev => {
   const m = JSON.parse(ev.data);
-  if (m.type === "hello") { GW = m.w; GH = m.h; $("device").textContent = ""; resize(); pushConfig(); generation = m.generation; $("genNow").textContent = genLabel(generation); setupDifficulties(m.difficulties, m.difficulty); setupOrders(m.orders, m.order); setAdviser(m.adviser); }
+  if (m.type === "hello") { GW = m.w; GH = m.h; $("device").textContent = m.replay ? `再生: ${m.replay}` : ""; resize(); pushConfig(); generation = m.generation; $("genNow").textContent = genLabel(generation); setupDifficulties(m.difficulties, m.difficulty); setupOrders(m.orders, m.order); setAdviser(m.adviser); }
   else if (m.type === "adviser") setAdviser(m.adviser);
   else if (m.type === "thinking") { $("adviser").classList.add("thinking"); $("reason").textContent = `方針役が考え中… (${TRIGGER_JP[m.kind] ?? m.kind})`; }
   else if (m.type === "advice") onAdvice(m);
