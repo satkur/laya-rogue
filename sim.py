@@ -146,6 +146,8 @@ def play(brain, seed, max_turns, start=None, difficulty="normal"):
             ms.append(d["ms"])
         trail.append((g.depth, g.hx, g.hy))
         acts.append(d["action"])
+        if g.pick_kind and d["action"] == "pick_up":  # the strategist's fetch target, needed to replay the walk
+            rec.setdefault("picks", {})[str(len(rec["actions"]))] = g.pick_kind
         g.step(d["action"])
         rec["actions"].append(d["action"])
         if time.monotonic() - flushed >= REPLAY_FLUSH:

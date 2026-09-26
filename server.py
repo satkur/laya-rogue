@@ -199,6 +199,7 @@ async def replay_loop():
                 if (a := advice_at.get(i)):
                     replay_state.update(calls=replay_state["calls"] + 1, **{k: a[k] for k in ("plan", "rest", "tactic", "fetch") if k in a})
                 g.valid_actions()  # same call order as when recording (it caches the exploration target)
+                g.pick_kind = rec.get("picks", {}).get(str(i))
                 g.step(rec["actions"][i])
                 i += 1
             g.log.clear()
@@ -226,9 +227,10 @@ async def replay_loop():
                 replay_state.update(calls=replay_state["calls"] + 1, **{k: a[k] for k in ("plan", "rest", "tactic", "fetch") if k in a})
                 await broadcast({"type": "advice", **a, "adviser": adviser_state()})
             action = rec["actions"][i]
-            i += 1
             g.valid_actions()
+            g.pick_kind = rec.get("picks", {}).get(str(i))
             g.step(action)
+            i += 1
             if g.depth != depth:
                 depth = g.depth
                 await broadcast({"type": "floor", "depth": depth})
