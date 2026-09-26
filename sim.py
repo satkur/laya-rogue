@@ -3,13 +3,14 @@
     uv run sim.py [回数] [最大ターン] [頭脳...] [--seeds 5003,5007] [--start 10] [--difficulty normal|hard|original]
 
 --seeds を付けると回数の代わりにそのシードだけを回す。頭脳ごとの 1 回ずつの結果は data/results_<頭脳>.json に残る
-各ゲームの行動列と方針役の相談は data/replays/<頭脳>_<種>[_B<開始階>][_<難易度>].json に残る (50 手ごとに書き出す)。
+各ゲームの行動列と方針役の相談は data/replays/<頭脳>_<種>[_B<開始階>][_<難易度>].json に残る (1 秒ごとに書き出す)。
 `uv run server.py --replay data/replays/<ファイル>` で画面に再生できる (回している最中のゲームも追いかけられる)。ゲームは種と行動列から再現するので、記録したときのコードで再生すること
 (normal 以外は results_<頭脳>_<難易度>.json)。--difficulty の既定は normal (NOTES.md 15 章)。
 
 頭脳: random / rules / diver / table:<ラウンド> / laya (未学習) / laya:<世代名>
       @<鋭さ> で行動の引き方を変える (@max で常に最有力、既定は 2.5)
       +llm / +llm:sonnet で方針役の LLM を付ける (strategist.py。claude -p を呼ぶので 1 ゲーム数分かかり、利用枠を使う)
+      +orders:save_healing,avoid_rusters で常時命令を固定で効かせる (LLM は呼ばない。命令が効くかを測る用。strategist.ORDERS)
 例:   uv run sim.py 40 8000 random rules table:12 laya laya:gen12@max
 """
 import json
@@ -34,6 +35,18 @@ LLM_GAMES = 4  # 方針役つきのゲームを同時に進める数 (待ち時�
 def split_spec(spec):
     spec, _, sh = spec.partition("@")
     return spec, (2.5 if not sh else None if sh == "max" else float(sh))
+
+
+def split_orders(spec):
+    """'laya:gen25b+orders:save_healing,avoid_rusters' -> ('laya:gen25b', {'save_healing', 'avoid_rusters'}): fixed standing orders, no LLM."""
+    spec, plus, orders = spec.partition("+orders:")
+    return spec, set(orders.split(",")) if plus else set()
+
+
+def with_orders(brain, orders):
+    from strategist import Guided, Strategist
+
+    return Guided(brain, Strategist(asker=None, orders=orders)) if orders else brain
 
 
 def split_llm(spec):
@@ -167,7 +180,8 @@ def play(brain, seed, max_turns, start=None, difficulty="normal"):
 
 def _cpu_job(args):
     spec, seed, max_turns, start, difficulty = args
-    return play(make_cpu_brain(spec), seed, max_turns, start, difficulty)
+    spec, orders = split_orders(spec)
+    return play(with_orders(make_cpu_brain(spec), orders), seed, max_turns, start, difficulty)
 
 
 def band_deaths(rs):
@@ -222,6 +236,7 @@ def main():
     for full in specs:
         t0 = time.perf_counter()
         spec, llm = split_llm(full)
+        spec, orders = split_orders(spec)
         if spec.startswith("laya"):
             from brain import LayaBrain
 
@@ -232,12 +247,12 @@ def main():
             else:
                 laya.load_generation(gen)
             laya.sharpness = sharpness
-            results = play_llm(lambda: laya, seeds, max_turns, llm, start, difficulty) if llm else [play(laya, s, max_turns, start, difficulty) for s in seeds]
+            results = play_llm(lambda: laya, seeds, max_turns, llm, start, difficulty) if llm else [play(with_orders(laya, orders), s, max_turns, start, difficulty) for s in seeds]
         elif llm:
             results = play_llm(lambda: make_cpu_brain(spec), seeds, max_turns, llm, start, difficulty)
         else:
             with ProcessPoolExecutor() as pool:
-                results = list(pool.map(_cpu_job, [(spec, s, max_turns, start, difficulty) for s in seeds], chunksize=2))
+                results = list(pool.map(_cpu_job, [(full, s, max_turns, start, difficulty) for s in seeds], chunksize=2))
         if start:
             full += f"@B{start}"
         if difficulty != "normal":
