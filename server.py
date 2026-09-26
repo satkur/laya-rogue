@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI):
     url = f"http://{HOST}:{PORT}/"
     if REPLAY:
         rec = load_replay()
-        replay_state.update(enabled=bool(rec["advice"]), model=rec["brain"])
+        replay_state.update(enabled=bool(rec["advice"]), model="再生")
         print(f"再生: {REPLAY} ({rec['brain']}, 種 {rec['seed']}, {len(rec['actions'])} 手{'' if rec.get('done') else '、記録中'})\n  → {url}", flush=True)
     else:
         print(f"Laya を読み込み中... (難易度 {DIFFICULTY.upper()})", flush=True)
@@ -78,6 +78,12 @@ async def index():
 
 def load_replay():
     return json.loads(REPLAY.read_text(encoding="utf-8"))
+
+
+def replay_generation(rec):
+    """再生中に「学習世代」の欄に出す名前。laya/gen25b+llm のような頭脳名はそのまま出すと分かりにくいので、世代だけにする (Laya 以外の頭脳は名前のまま)。"""
+    name = rec["brain"]
+    return name.removeprefix("laya/").removesuffix("+llm") if name.startswith("laya/") else name
 
 
 def adviser_state():
@@ -117,7 +123,7 @@ def frame(g, d, log_from):
 async def ws(sock: WebSocket):
     await sock.accept()
     cfg = {"delay": 0.119, "paused": False, "step": False, "restart": False}
-    await sock.send_json({"type": "hello", "w": W, "h": H, "generation": load_replay()["brain"] if REPLAY else brain.generation,
+    await sock.send_json({"type": "hello", "w": W, "h": H, "generation": replay_generation(load_replay()) if REPLAY else brain.generation,
                           "difficulties": list(D.DIFFICULTIES), "difficulty": load_replay().get("difficulty", "normal") if REPLAY else DIFFICULTY,
                           "replay": REPLAY.name if REPLAY else None,
                           "orders": [], "order": None,  # 命令はいったん外してある
@@ -167,8 +173,8 @@ async def ws(sock: WebSocket):
         while True:
             rec = load_replay()
             g = Game(rec["seed"], standard_hero(rec["start"]) if rec.get("start") else None, rec.get("difficulty", "normal"))
-            g.say(f"再生: {REPLAY.name} ({rec['brain']}, 地図の種 {g.seed})")
-            replay_state.update(enabled=bool(rec["advice"]), model=rec["brain"], calls=0, plan="free", rest=False, tactic="free", fetch="none")
+            g.say(f"再生: {REPLAY.name} (地図の種 {g.seed})")
+            replay_state.update(enabled=bool(rec["advice"]), model="再生", calls=0, plan="free", rest=False, tactic="free", fetch="none")
             advice_at = {a["i"]: a for a in rec["advice"]}
             depth, log_from, i = g.depth, 0, 0
             await sock.send_json({"type": "floor", "depth": depth})
@@ -202,7 +208,7 @@ async def ws(sock: WebSocket):
                 log_from = len(g.log)
                 await asyncio.sleep(cfg["delay"])
             if not cfg["restart"]:
-                await sock.send_json({"type": "end", "won": g.won, "cause": g.cause, "generation": rec["brain"], "difficulty": g.rules.name, "depth": g.depth,
+                await sock.send_json({"type": "end", "won": g.won, "cause": g.cause, "generation": replay_generation(rec), "difficulty": g.rules.name, "depth": g.depth,
                                       "kills": g.kills, "gold": g.gold, "turn": g.turn, "level": g.level})
                 while not cfg["restart"]:
                     await asyncio.sleep(0.1)
