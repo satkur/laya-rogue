@@ -109,7 +109,7 @@ STALL_TURNS, STALL_TILES = 300, 4  # この連続ターン数のあいだ踏ん�
 
 
 REPLAYS = DATA / "replays"
-REPLAY_FLUSH = 50  # この手数ごとに記録を書き出す (再生側が追いかけられるように)
+REPLAY_FLUSH = 1.0  # この秒数ごとに記録を書き出す (再生側がほぼ遅れなく追いかけられるように。50 手ごとだと Laya の速さでは数十秒遅れた)
 
 
 def replay_path(name, seed, start=None, difficulty="normal"):
@@ -134,6 +134,7 @@ def play(brain, seed, max_turns, start=None, difficulty="normal"):
         brain.rng = random.Random(seed)
     g.action_rng = random.Random(seed)  # Laya はこちらを使う。方針役つき (Guided / Locked 越しで brain.rng が付かず、4 ゲームが 1 つの Laya を共有) でも単独と同じゲームになる (NOTES 15 章)
     ms, miss, n = [], 0, 0
+    flushed = time.monotonic()
     stalls, trail, acts, stall_depth = [], [], [], 0  # 行き詰まり: 敵もいないのに数マスを往復し続ける (NOTES 13 章)
     while not g.over and g.turn < max_turns:
         d = brain.decide(g)
@@ -147,8 +148,9 @@ def play(brain, seed, max_turns, start=None, difficulty="normal"):
         acts.append(d["action"])
         g.step(d["action"])
         rec["actions"].append(d["action"])
-        if len(rec["actions"]) % REPLAY_FLUSH == 0:
+        if time.monotonic() - flushed >= REPLAY_FLUSH:
             save_replay(rpath, rec)
+            flushed = time.monotonic()
         g.log.clear()
         if (len(trail) >= STALL_TURNS and stall_depth != g.depth and len(set(trail[-STALL_TURNS:])) <= STALL_TILES
                 and not ({"rest", "attack", "throw"} & set(acts[-STALL_TURNS:])) and not any(m["awake"] for m in g.visible_monsters())):
