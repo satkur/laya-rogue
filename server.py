@@ -27,7 +27,7 @@ HOST, PORT = "127.0.0.1", 8766
 STATIC = Path(__file__).parent / "static"
 brain = None
 LLM_MODEL = sys.argv[sys.argv.index("--llm-model") + 1] if "--llm-model" in sys.argv else DEFAULT_MODEL
-DEFAULT_GENERATION = "gen25"  # 既定は「測定済みの最良」を固定 (weights/ の最新番号は未測定のことがある。全要素入りの環境で gen25 6.24 / gen24 6.07、NOTES 15 章)
+DEFAULT_GENERATION = "gen25"  # 既定は「測定済みの最良」を固定 (weights/ の最新番号は未測定のことがある。全要素入りの環境で gen25 6.24 / gen25b 6.16 / gen24 6.07、NOTES 15 章)
 GENERATION = sys.argv[sys.argv.index("--gen") + 1] if "--gen" in sys.argv else DEFAULT_GENERATION
 DIFFICULTY = sys.argv[sys.argv.index("--difficulty") + 1] if "--difficulty" in sys.argv else "normal"
 D.rules(DIFFICULTY)  # 名前の検査
