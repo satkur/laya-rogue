@@ -11,6 +11,7 @@
       @<鋭さ> で行動の引き方を変える (@max で常に最有力、既定は 2.5)
       +llm / +llm:sonnet で方針役の LLM を付ける (strategist.py。claude -p を呼ぶので 1 ゲーム数分かかり、利用枠を使う)
       +orders:save_healing,avoid_rusters で常時命令を固定で効かせる (LLM は呼ばない。命令が効くかを測る用。strategist.ORDERS)
+      +swap:diver/combat,rest で指定した場面だけ別の頭脳 (diver など) に決めさせる (診断用。どの場面で負けているかを測る。brain.scene / Swap。指定の末尾に置く)
 例:   uv run sim.py 40 8000 random rules table:12 laya laya:gen12@max
 """
 import json
@@ -23,7 +24,7 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import rogue_data as D
-from brain import DiverBrain, RandomBrain, RuleBrain, TableBrain
+from brain import SCENES, DiverBrain, RandomBrain, RuleBrain, Swap, TableBrain
 from game import Game
 
 DATA = Path(__file__).parent / "data"
@@ -41,6 +42,18 @@ def split_orders(spec):
     """'laya:gen25b+orders:save_healing,avoid_rusters' -> ('laya:gen25b', {'save_healing', 'avoid_rusters'}): fixed standing orders, no LLM."""
     spec, plus, orders = spec.partition("+orders:")
     return spec, set(orders.split(",")) if plus else set()
+
+
+def split_swap(spec):
+    """'laya:gen25b+swap:diver/combat,rest' -> ('laya:gen25b', 'diver', ['combat', 'rest']): diagnostic scene swap (brain.Swap)."""
+    spec, plus, rest = spec.partition("+swap:")
+    if not plus:
+        return spec, None, []
+    other, _, scenes = rest.partition("/")
+    scenes = scenes.split(",")
+    if not set(scenes) <= set(SCENES) | {"combat"}:
+        raise ValueError(f"swap scenes must be among {SCENES} or combat: {scenes}")
+    return spec, other, scenes
 
 
 def with_orders(brain, orders):
@@ -178,10 +191,34 @@ def play(brain, seed, max_turns, start=None, difficulty="normal"):
                 amulet=g.amulet, final_depth=g.depth)
 
 
+def make_brain(spec, laya=None):
+    """Any CPU spec, or a Laya spec when `laya` is a one-element list holding the shared LayaBrain (or None to create it)."""
+    spec, other, scenes = split_swap(spec)
+    spec, orders = split_orders(spec)
+    brain = _single_brain(spec, laya)
+    if other:
+        brain = Swap(brain, _single_brain(other, laya), scenes)
+    return with_orders(brain, orders)
+
+
+def _single_brain(spec, laya):
+    if not spec.startswith("laya"):
+        return make_cpu_brain(spec)
+    from brain import LayaBrain
+
+    name, sharpness = split_spec(spec)
+    gen = name[5:] or None
+    if laya[0] is None:
+        laya[0] = LayaBrain(gen)
+    else:
+        laya[0].load_generation(gen)
+    laya[0].sharpness = sharpness
+    return laya[0]
+
+
 def _cpu_job(args):
     spec, seed, max_turns, start, difficulty = args
-    spec, orders = split_orders(spec)
-    return play(with_orders(make_cpu_brain(spec), orders), seed, max_turns, start, difficulty)
+    return play(make_brain(spec), seed, max_turns, start, difficulty)
 
 
 def band_deaths(rs):
@@ -232,24 +269,15 @@ def main():
     seeds = seeds or [5000 + i for i in range(runs)]
     runs = len(seeds)
     print(f"{runs} 回 × 最大 {max_turns} ターン (全頭脳で同じシード、難易度 {difficulty.upper()})" + (f"、B{start}F から標準の勇者で開始" if start else "") + "\n")
-    laya = None
+    laya = [None]  # the one LayaBrain on the GPU, reloaded per generation
     for full in specs:
         t0 = time.perf_counter()
         spec, llm = split_llm(full)
-        spec, orders = split_orders(spec)
-        if spec.startswith("laya"):
-            from brain import LayaBrain
-
-            name, sharpness = split_spec(spec)
-            gen = name[5:] or None
-            if laya is None:
-                laya = LayaBrain(gen)
-            else:
-                laya.load_generation(gen)
-            laya.sharpness = sharpness
-            results = play_llm(lambda: laya, seeds, max_turns, llm, start, difficulty) if llm else [play(with_orders(laya, orders), s, max_turns, start, difficulty) for s in seeds]
+        if "laya" in spec:  # sequential: one GPU brain
+            brain = make_brain(spec, laya)
+            results = play_llm(lambda: brain, seeds, max_turns, llm, start, difficulty) if llm else [play(brain, s, max_turns, start, difficulty) for s in seeds]
         elif llm:
-            results = play_llm(lambda: make_cpu_brain(spec), seeds, max_turns, llm, start, difficulty)
+            results = play_llm(lambda: make_brain(spec), seeds, max_turns, llm, start, difficulty)
         else:
             with ProcessPoolExecutor() as pool:
                 results = list(pool.map(_cpu_job, [(full, s, max_turns, start, difficulty) for s in seeds], chunksize=2))
@@ -261,7 +289,7 @@ def main():
         stalled = [(s, r["stalls"]) for s, r in zip(seeds, results) if r.get("stalls")]
         if stalled:
             print(f"    行き詰まり {len(stalled)} 回: " + " ".join(f"種{s}@B{st[0][0]}F(t{st[0][1]})" for s, st in stalled[:12]) + (" ..." if len(stalled) > 12 else ""), flush=True)
-        (DATA / f"results_{full.replace(':', '-').replace('@', '_')}.json").write_text(
+        (DATA / f"results_{full.replace(':', '-').replace('@', '_').replace('/', '-')}.json").write_text(
             json.dumps({str(s): {k: v for k, v in r.items() if k != "ms"} for s, r in zip(seeds, results)}, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
