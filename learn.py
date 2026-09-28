@@ -32,12 +32,14 @@ import rogue_data as D
 from pathlib import Path
 
 from brain import TAU, coarse_key, describe, hp_word
-from game import Game, avg_dice
+from game import Game, active, avg_dice
 
 DATA = Path(__file__).parent / "data"
 HORIZON = 40        # 先読みするターン数
 ROLLOUTS = 3        # 1 行動あたりの先読み回数
 P_EVAL = 0.05       # 通過した局面のうち、先読みで調べる割合
+P_EVAL_COMBAT, ROLLOUTS_COMBAT = 0.25, 6   # 起きた敵が隣にいる / 2 体以上いる局面。死の減点 (170 点前後) が行動と無関係に 3〜4% の先読みに落ちて
+                    # 行動の差 (1 点前後) を隠していたので、標本を増やす (NOTES 15 章、相談役の分析 2026-09-28)
 P_EVAL_RARE = 0.5   # 稀な判断 (薬・巻物を使う、危険な場面で未識別を試す) が選べる局面は、この割合で調べる。
                     # 5% のままだと経験表の重みが 4 に届かず、回復薬や転移の使い方を判断ヘッドに教えていなかった (NOTES.md 11 章)
 RARE_ACTIONS = {"quaff_heal", "quaff_str", "read_map", "read_teleport", "zap_bolt", "zap_missile", "zap_slow", "zap_away",
@@ -46,7 +48,8 @@ RARE_ACTIONS = {"quaff_heal", "quaff_str", "read_map", "read_teleport", "zap_bol
 # RARE は「その場面でしか選べない (敵が直線上にいる、起きた敵がいる、傷ついている)」行動だけ。持っているだけで毎ターン選べる行動
 # (識別・強化・解呪・指輪の着脱・恐怖の巻物・食料探知・探知の薬・光の杖・弓を戻す) を入れると、それを持った後は毎ターン 50% で先読みして
 # 計算が 10 倍になり、表が「持ち物がある平時」に偏る (アドバイザーの指摘、NOTES 15 章)
-COMMIT_ACTIONS = {"rest", "explore", "search", "descend", "ascend", "approach", "flee", "pick_up"}  # 続けて意味のある行動だけ COMMIT する
+COMMIT_ACTIONS = {"rest", "explore", "search", "descend", "ascend", "approach", "flee", "pick_up", "attack"}  # 続けて意味のある行動だけ COMMIT する
+# attack も COMMIT (2026-09-28): 1 回殴って残りを表任せにすると、殴り合いの価値が表のノイズに埋もれていた (NOTES 15 章)
 MAX_TURNS = 3000
 EPSILON = 0.15      # 表を無視して気まぐれに動く確率 (知らない局面に出会うため)
 DECAY = 0.5         # ラウンドをまたぐとき、古い経験の重みをこれだけ残す
@@ -161,11 +164,18 @@ def value(table, key, valid, base=None):
     return sum(v * w for v, w in zip(vals, weights)) / sum(weights)
 
 
+def fighting(key):
+    """The key's enemy field names an awake, free enemy (not none / asleep / held)."""
+    e = key.split("|")[2]
+    return e != "none" and not e.startswith(("asleep-", "held-"))
+
+
 def rollout(g, action, table, v_default, seed):
     rng = random.Random(seed)
     sim = g.clone(seed)
     before = score(sim)
     key0 = coarse_key(sim, sim.valid_actions())
+    fight = fighting(key0)
     sim.step(action)
     committed = 1 if action in COMMIT_ACTIONS else 0  # 薬・巻物・杖などは 1 回だけ (続けると「持っている分をまとめて使う」値になる)
     for _ in range(HORIZON - 1):
@@ -173,6 +183,8 @@ def rollout(g, action, table, v_default, seed):
             break
         valid = sim.valid_actions()
         key = coarse_key(sim, valid)
+        if fight and not fighting(key):  # the fight is over: stop here and close with the bootstrap, so later unrelated fights do not add noise
+            break
         if committed and committed < COMMIT and key == key0:
             committed += 1
             sim.step(action)
@@ -212,10 +224,12 @@ def episode(args):
         key = coarse_key(g, valid)
         gamble = ("quaff_unknown" in valid or "read_unknown" in valid) and (
             hp_word(g) in ("low", "critical") or any(m["awake"] for m in g.visible_monsters()))
-        p_eval = P_EVAL_RARE if (RARE_ACTIONS & set(valid) or gamble) else P_EVAL
+        awake = [m for m in g.visible_monsters() if active(m)]
+        combat = len(awake) >= 2 or any(g._adjacent(m) for m in awake)
+        p_eval = P_EVAL_RARE if (RARE_ACTIONS & set(valid) or gamble) else P_EVAL_COMBAT if combat else P_EVAL
         if len(valid) > 1 and rng.random() < p_eval:
             # 行動どうしの比較では同じ乱数列を使う。「運の差」が消えて「行動の差」だけが残る
-            seeds = [rng.random() for _ in range(ROLLOUTS)]
+            seeds = [rng.random() for _ in range(ROLLOUTS_COMBAT if combat else ROLLOUTS)]
             out.append((key, describe(g, valid), {a: sum(rollout(g, a, _table, _v_default, s) for s in seeds) / ROLLOUTS for a in valid}))
         a = pick(_table, key, valid, rng, TAU, EPSILON)
         g.step(a)
