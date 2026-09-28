@@ -1129,7 +1129,12 @@ attack が COMMIT に入っていないので「1 回殴って残りは表 (ノ�
 関門 (CPU だけ、GPU の前): `uv run learn.py 16 1200` (data/learn_gen26.log、表は data/stage9_combat/) → table:16 の 128 シード ≥ 5.8 (現行 5.26) かつ combat_compare の表=diver ≥ 45% (現行 34%)。通らなければ train しない。
 通ったら `uv run train.py 16 gen26 60` → 128 シード。成功の目安は Laya ≥ 7.5 (現行 6.76、戦闘だけ diver の上限 7.95)。scene_stats の other / rest の一致率 (85 / 90%) が落ちていないこと、Laya=表 (現行 45%) も測る。
 注意: 2 で戦闘キーの見込みの尺度が変わるので、v_default (見込みの平均、現行 -9.46) の推移をラウンドごとに見る。DECAY 0.5 なので重みは実質 2 ラウンドぶん (ノイズは平均化されにくい)。
-並行して戦闘の下位場面 (crowd / melee / ranged、6e4eebe) の差し替えも測っている (data/swap_gen25b.log)。
+並行して戦闘の下位場面 (crowd / melee / ranged、6e4eebe) の差し替えも測っている (data/swap_gen25b.log): melee だけ diver 7.32 ±0.41 (+0.56)、ranged だけ 7.22 ±0.40 (+0.46)。隣で殴る判断と離れた敵への対応が半分ずつ。
+
+**gen26 の学習と関門 (2026-09-28 16:20〜17:55、data/learn_gen26.log、表は data/stage9_combat/)**: 16 ラウンド 94 分 (gen25 の 40 分から 2.3 倍。戦闘の標本を増やしたぶん)。
+1 階から始めた回の平均はラウンド 4 以降 5.7〜6.3 で横ばい (gen25 は r6 5.9 → r9 4.4 と落ちていた)。表の状況数 38,864 (gen25 29,672)、見込みの平均は -17 前後で安定 (gen25 は -9.5。戦闘から始めた先読みを敵が消えた時点で締めるので尺度が変わった)。
+関門は両方通過: table:16 の 128 シード **5.26 → 6.57 ±0.38** (表にない状況 40% のまま)、combat_compare の表=diver **34% → 48%** (隣の弱い敵 1 体では 45% → 64%、data/combat_compare_gen26table.txt)。
+複数の敵 (+) のキーは gen25b の記録の局面ではまだ多くが表にない (weak-adjacent+ で None 496)。→ `uv run train.py 16 gen26 60` → 128 シード (data/train_gen26.log)。
 
 ### 次にやること
 
