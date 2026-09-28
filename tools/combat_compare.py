@@ -10,7 +10,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from brain import DiverBrain, coarse_key, dist_word, scene, threat_word  # noqa: E402
+from brain import COMBAT, DiverBrain, coarse_key, dist_word, scene, threat_word  # noqa: E402
 from game import Game, active  # noqa: E402
 from sim import standard_hero  # noqa: E402
 
@@ -29,7 +29,7 @@ for f in files:
     for i, a in enumerate(rec["actions"]):
         valid = g.valid_actions()
         d = diver.decide(g)["action"]
-        if scene(g, valid) == "combat":
+        if scene(g, valid) in COMBAT:
             q = table.get(coarse_key(g, valid), {}).get("q")
             t = max((x for x in valid if x in q), key=lambda x: q[x][0]) if q else None
             awake = [m for m in g.visible_monsters() if active(m)]
