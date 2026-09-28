@@ -356,8 +356,10 @@ def crowd_escape(brain, g, awake, valid):
     movers = [m for m in awake if m["ch"] != "F"]
     alert = getattr(brain, "crowd_alert", None)
     if len(movers) >= CROWD and not any(g._adjacent(m) for m in movers):
-        brain.crowd_alert = alert = (id(g), g.depth, g.turn + CROWD_TURNS)
-    if alert is None or alert[0] != id(g) or alert[1] != g.depth or g.turn >= alert[2]:
+        brain.crowd_alert = alert = (g.seed, g.depth, g.turn + CROWD_TURNS)
+    # Keyed by seed, depth and a turn window, so an alert cannot leak into the next game when one brain plays many games in a row
+    # (id(g) was reused by the next Game object and made the swap diagnostic flee for whole levels, 2026-09-28).
+    if alert is None or alert[0] != g.seed or alert[1] != g.depth or not (alert[2] - CROWD_TURNS <= g.turn < alert[2]):
         return None
     return "descend" if "descend" in valid else "flee" if "flee" in valid else None
 
@@ -556,3 +558,43 @@ class DiverBrain:
         else:
             a = next((x for x in (("drop", "ascend") if g.amulet else ("drop",)) + ("pick_up", "descend", "explore", "search") if x in valid), "rest")
         return {"action": a, "probs": {a: 1.0}, "state": "", "ms": 0.0}
+
+
+# --- Diagnostic: which decision does the hero face this turn (NOTES 15, 2026-09-28). One scene per turn, judged on the state before acting.
+SCENES = ("crowd", "melee", "ranged", "items", "stairs", "rest")  # crowd / melee / ranged split "combat" (awake enemy in view)
+COMBAT = ("crowd", "melee", "ranged")
+ITEM_PREFIXES = ("quaff_", "read_", "zap_", "wield_")
+ITEM_ACTIONS = {"equip", "put_on_ring", "remove_ring", "eat", "drop"}
+
+
+def scene(g, valid):
+    awake = [m for m in g.visible_monsters() if active(m)]
+    if len(awake) >= 2:
+        return "crowd"
+    if awake:
+        return "melee" if "attack" in valid else "ranged"
+    if any(a.startswith(ITEM_PREFIXES) or a in ITEM_ACTIONS for a in valid):
+        return "items"
+    if "descend" in valid or "ascend" in valid:
+        return "stairs"
+    if hp_word(g) in ("wounded", "low", "critical"):
+        return "rest"
+    return "other"
+
+
+class Swap:
+    """Diagnostic only, never a playing mode: `main` decides, except in the named scenes where `other` decides.
+    Swapping one scene at a time between the pilot and the hand-written diver shows where the pilot loses depth (NOTES 15).
+    The rule brains keep per-game state (crowd_alert), so they are consulted every turn even when the other brain decides."""
+
+    def __init__(self, main, other, scenes):
+        self.main, self.other = main, other
+        self.scenes = {x for s in scenes for x in (COMBAT if s == "combat" else (s,))}
+        self.name = f"{main.name}+swap:{other.name}/{','.join(scenes)}"
+
+    def decide(self, g):
+        valid = g.valid_actions()
+        deciding, idle = (self.other, self.main) if scene(g, valid) in self.scenes else (self.main, self.other)
+        if isinstance(idle, (RuleBrain, DiverBrain)):
+            idle.decide(g)
+        return deciding.decide(g)
