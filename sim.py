@@ -51,8 +51,8 @@ def split_swap(spec):
         return spec, None, []
     other, _, scenes = rest.partition("/")
     scenes = scenes.split(",")
-    if not set(scenes) <= set(SCENES):
-        raise ValueError(f"swap scenes must be among {SCENES}: {scenes}")
+    if not set(scenes) <= set(SCENES) | {"combat"}:
+        raise ValueError(f"swap scenes must be among {SCENES} or combat: {scenes}")
     return spec, other, scenes
 
 

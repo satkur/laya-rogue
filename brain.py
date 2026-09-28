@@ -561,14 +561,18 @@ class DiverBrain:
 
 
 # --- Diagnostic: which decision does the hero face this turn (NOTES 15, 2026-09-28). One scene per turn, judged on the state before acting.
-SCENES = ("combat", "items", "stairs", "rest")
+SCENES = ("crowd", "melee", "ranged", "items", "stairs", "rest")  # crowd / melee / ranged split "combat" (awake enemy in view)
+COMBAT = ("crowd", "melee", "ranged")
 ITEM_PREFIXES = ("quaff_", "read_", "zap_", "wield_")
 ITEM_ACTIONS = {"equip", "put_on_ring", "remove_ring", "eat", "drop"}
 
 
 def scene(g, valid):
-    if any(active(m) for m in g.visible_monsters()):
-        return "combat"
+    awake = [m for m in g.visible_monsters() if active(m)]
+    if len(awake) >= 2:
+        return "crowd"
+    if awake:
+        return "melee" if "attack" in valid else "ranged"
     if any(a.startswith(ITEM_PREFIXES) or a in ITEM_ACTIONS for a in valid):
         return "items"
     if "descend" in valid or "ascend" in valid:
@@ -584,8 +588,9 @@ class Swap:
     The rule brains keep per-game state (crowd_alert), so they are consulted every turn even when the other brain decides."""
 
     def __init__(self, main, other, scenes):
-        self.main, self.other, self.scenes = main, other, set(scenes)
-        self.name = f"{main.name}+swap:{other.name}/{','.join(s for s in SCENES if s in self.scenes)}"
+        self.main, self.other = main, other
+        self.scenes = {x for s in scenes for x in (COMBAT if s == "combat" else (s,))}
+        self.name = f"{main.name}+swap:{other.name}/{','.join(scenes)}"
 
     def decide(self, g):
         valid = g.valid_actions()
