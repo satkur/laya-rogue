@@ -356,8 +356,10 @@ def crowd_escape(brain, g, awake, valid):
     movers = [m for m in awake if m["ch"] != "F"]
     alert = getattr(brain, "crowd_alert", None)
     if len(movers) >= CROWD and not any(g._adjacent(m) for m in movers):
-        brain.crowd_alert = alert = (id(g), g.depth, g.turn + CROWD_TURNS)
-    if alert is None or alert[0] != id(g) or alert[1] != g.depth or g.turn >= alert[2]:
+        brain.crowd_alert = alert = (g.seed, g.depth, g.turn + CROWD_TURNS)
+    # Keyed by seed, depth and a turn window, so an alert cannot leak into the next game when one brain plays many games in a row
+    # (id(g) was reused by the next Game object and made the swap diagnostic flee for whole levels, 2026-09-28).
+    if alert is None or alert[0] != g.seed or alert[1] != g.depth or not (alert[2] - CROWD_TURNS <= g.turn < alert[2]):
         return None
     return "descend" if "descend" in valid else "flee" if "flee" in valid else None
 
