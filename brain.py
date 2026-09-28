@@ -556,3 +556,38 @@ class DiverBrain:
         else:
             a = next((x for x in (("drop", "ascend") if g.amulet else ("drop",)) + ("pick_up", "descend", "explore", "search") if x in valid), "rest")
         return {"action": a, "probs": {a: 1.0}, "state": "", "ms": 0.0}
+
+
+# --- Diagnostic: which decision does the hero face this turn (NOTES 15, 2026-09-28). One scene per turn, judged on the state before acting.
+SCENES = ("combat", "items", "stairs", "rest")
+ITEM_PREFIXES = ("quaff_", "read_", "zap_", "wield_")
+ITEM_ACTIONS = {"equip", "put_on_ring", "remove_ring", "eat", "drop"}
+
+
+def scene(g, valid):
+    if any(active(m) for m in g.visible_monsters()):
+        return "combat"
+    if any(a.startswith(ITEM_PREFIXES) or a in ITEM_ACTIONS for a in valid):
+        return "items"
+    if "descend" in valid or "ascend" in valid:
+        return "stairs"
+    if hp_word(g) in ("wounded", "low", "critical"):
+        return "rest"
+    return "other"
+
+
+class Swap:
+    """Diagnostic only, never a playing mode: `main` decides, except in the named scenes where `other` decides.
+    Swapping one scene at a time between the pilot and the hand-written diver shows where the pilot loses depth (NOTES 15).
+    The rule brains keep per-game state (crowd_alert), so they are consulted every turn even when the other brain decides."""
+
+    def __init__(self, main, other, scenes):
+        self.main, self.other, self.scenes = main, other, set(scenes)
+        self.name = f"{main.name}+swap:{other.name}/{','.join(s for s in SCENES if s in self.scenes)}"
+
+    def decide(self, g):
+        valid = g.valid_actions()
+        deciding, idle = (self.other, self.main) if scene(g, valid) in self.scenes else (self.main, self.other)
+        if isinstance(idle, (RuleBrain, DiverBrain)):
+            idle.decide(g)
+        return deciding.decide(g)
