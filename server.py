@@ -42,8 +42,8 @@ REPLAY = Path(sys.argv[sys.argv.index("--replay") + 1]) if "--replay" in sys.arg
 REPLAY_DIR = REPLAY if REPLAY and REPLAY.is_dir() else None  # ディレクトリなら常に最新の記録を追いかける
 CATCH_UP = 100  # 記録中の記録に移るとき、末尾のこの手数だけ残して飛ばす
 replay_state = {"enabled": False, "model": "", "stopped": None, "calls": 0, "plan": "free", "rest": False, "tactic": "free", "fetch": "none"}  # 再生中の方針役の表示
-replay = {"cfg": {"delay": 0.119, "paused": False, "step": False, "restart": False}, "clients": set(), "game": None, "file": None, "rec": None}  # one replay, streamed to every tab
-adviser = Strategist(model=LLM_MODEL, enabled="--no-llm" not in sys.argv)  # 既定は入り (2026-10-03 ユーザー指示。測定では付けると成績が下がる、NOTES.md 15 章)
+replay = {"cfg": {"delay": 0.119, "paused": False, "restart": False}, "clients": set(), "game": None, "file": None, "rec": None}  # one replay, streamed to every tab
+ADVISER_ON = "--no-llm" not in sys.argv  # 既定は入り (2026-10-03 ユーザー指示。測定では付けると成績が下がる、NOTES.md 15 章)。L キーで切り替えると次のタブにも引き継ぐ
 strategist_mod.MAX_CALLS_TOTAL = 300  # 画面を開きっぱなしにしても、ここで方針役は自動で止まる (画面で入れ直すと再開)
 
 
@@ -114,14 +114,14 @@ def replay_generation(rec):
     return name.removeprefix("laya/").split("+")[0] if name.startswith("laya/") else name
 
 
-def adviser_state():
-    if REPLAY:
+def adviser_state(adviser=None):
+    if REPLAY or adviser is None:
         return dict(replay_state)
     return {"enabled": adviser.enabled, "model": adviser.model, "stopped": adviser.stopped, "calls": adviser.calls,
             "plan": adviser.plan, "rest": adviser.rest, "tactic": adviser.tactic, "fetch": adviser.fetch}
 
 
-def frame(g, d, log_from):
+def frame(g, d, log_from, adviser=None, tokens=None):
     return {
         "type": "frame",
         "turn": g.turn,
@@ -142,7 +142,8 @@ def frame(g, d, log_from):
         "seen": g.newly_seen,
         "visible": [list(p) for p in g.visible],
         "decision": d,
-        "adviser": adviser_state(),
+        "adviser": adviser_state(adviser),
+        "tokens": tokens,  # this game's totals {laya, adviser}; None in replays
         "log": g.log[log_from:],
     }
 
@@ -212,9 +213,8 @@ async def replay_loop():
         g.newly_seen = []
         log_from = len(g.log)
         while not g.over and not cfg["restart"]:
-            while cfg["paused"] and not cfg["step"] and not cfg["restart"]:
+            while cfg["paused"] and not cfg["restart"]:
                 await asyncio.sleep(0.03)
-            cfg["step"] = False
             if i >= len(rec["actions"]):
                 if rec.get("done"):
                     break
@@ -248,14 +248,17 @@ async def replay_loop():
 
 @app.websocket("/ws")
 async def ws(sock: WebSocket):
+    global ADVISER_ON
     await sock.accept()
-    cfg = replay["cfg"] if REPLAY else {"delay": 0.119, "paused": False, "step": False, "restart": False}
+    cfg = replay["cfg"] if REPLAY else {"delay": 0.119, "paused": False, "restart": False}
+    # one strategist per tab: a shared one mixed two games' state (its depth flipped every turn, so it consulted "new floor" each turn)
+    adviser = None if REPLAY else Strategist(model=LLM_MODEL, enabled=ADVISER_ON)
     hello_rec = replay["rec"] or (load_replay() if latest_replay() else None) if REPLAY else None
     await sock.send_json({"type": "hello", "w": W, "h": H, "generation": (replay_generation(hello_rec) if hello_rec else None) if REPLAY else brain.generation,
                           "difficulties": list(D.DIFFICULTIES), "difficulty": hello_rec.get("difficulty", "normal") if hello_rec else DIFFICULTY,
                           "replay": (replay["file"].name if replay["file"] else REPLAY.name) if REPLAY else None,
                           "orders": [], "order": None,  # 命令はいったん外してある
-                          "adviser": adviser_state()})
+                          "adviser": adviser_state(adviser)})
 
     async def play():
         global DIFFICULTY
@@ -266,26 +269,28 @@ async def ws(sock: WebSocket):
             adviser.reset()
             gen = brain.generation
             depth, log_from = g.depth, 0
+            tokens = {"laya": 0, "adviser": 0}
             # 最初の盤面を先に映す (方針役の相談で止まるより前に、勇者が現れた画面にする)
             await sock.send_json({"type": "floor", "depth": depth})
-            await sock.send_json(frame(g, {"action": None, "probs": {}, "state": "", "ms": 0.0}, log_from))
+            await sock.send_json(frame(g, {"action": None, "probs": {}, "state": "", "ms": 0.0}, log_from, adviser, tokens))
             g.newly_seen = []
             log_from = len(g.log)
             while not g.over and not cfg["restart"]:
-                while cfg["paused"] and not cfg["step"] and not cfg["restart"]:
+                while cfg["paused"] and not cfg["restart"]:
                     await asyncio.sleep(0.03)
-                cfg["step"] = False
                 trigger = adviser.check(g)
                 if trigger:  # 方針役は数秒かかる。そのあいだゲームは止めて待つ
                     await sock.send_json({"type": "thinking", "kind": adviser.kind})
                     advice = await asyncio.to_thread(adviser.consult, g, trigger)
-                    await sock.send_json({"type": "advice", **advice, "adviser": adviser_state()})
+                    tokens["adviser"] += advice.get("tokens", 0)
+                    await sock.send_json({"type": "advice", **advice, "adviser": adviser_state(adviser)})
                 d = decide_within(brain, g, adviser)  # 10-30 ms, called on the event loop (single local user)
+                tokens["laya"] += d.get("tokens", 0)
                 g.step(d["action"])
                 if g.depth != depth:
                     depth = g.depth
                     await sock.send_json({"type": "floor", "depth": depth})
-                await sock.send_json(frame(g, d, log_from))
+                await sock.send_json(frame(g, d, log_from, adviser, tokens))
                 g.newly_seen = []
                 log_from = len(g.log)
                 await asyncio.sleep(cfg["delay"])
@@ -307,17 +312,14 @@ async def ws(sock: WebSocket):
             if REPLAY and m["type"] in ("adviser", "difficulty"):  # 再生中は方針役と難易度の切替は効かない
                 continue
             if m["type"] == "config":
-                cfg["delay"] = max(0.0, min(1.0, float(m.get("delay", cfg["delay"]))))
                 cfg["paused"] = bool(m.get("paused", cfg["paused"]))
-            elif m["type"] == "step":
-                cfg["step"] = True
             elif m["type"] == "restart":
                 cfg["restart"] = True
             elif m["type"] == "adviser":  # 方針役の ON/OFF。入れ直すと自動停止も解除する
-                adviser.enabled = bool(m.get("enabled"))
+                adviser.enabled = ADVISER_ON = bool(m.get("enabled"))
                 if adviser.enabled:
                     adviser.stopped, adviser.errors, strategist_mod.total_calls = None, 0, 0
-                await sock.send_json({"type": "adviser", "adviser": adviser_state()})
+                await sock.send_json({"type": "adviser", "adviser": adviser_state(adviser)})
             elif m["type"] == "difficulty":  # 難易度を替えたら、最初から潜り直す
                 name = m.get("name")
                 if name in D.DIFFICULTIES:

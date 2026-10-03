@@ -29,7 +29,6 @@
   header { display: flex; align-items: center; gap: 16px; padding: 3px 12px; background: var(--header-bg); color: var(--text); border-bottom: 2px solid var(--frame); }
   header h1 { font: 400 16px/1.4 var(--font); margin: 0; letter-spacing: .12em; }
   header h1 span { color: var(--accent); }
-  header .ver { color: var(--frame-hi); }
   header .spacer { flex: 1; }
   #device { color: var(--frame-hi); }
 
@@ -62,8 +61,6 @@
   .cell.wide { grid-column: span 2; }
   .cell .k { color: var(--dim); font-size: 14px; }
 
-  #state { color: var(--state); min-height: 46px; margin-bottom: 6px; }
-  #state::before { content: "A>"; color: var(--dim); margin-right: 6px; }
   .act { display: grid; grid-template-columns: 16px 58px 1fr 44px; gap: 6px; align-items: center; padding: 1px 2px; }
   .act .mark { color: var(--accent); }
   .act .name { color: var(--frame-hi); }
@@ -80,7 +77,8 @@
   th:first-child, td:first-child { text-align: left; color: var(--frame-hi); }
   tr.now td:first-child::before { content: "▶"; color: var(--accent); }
   tr.now { background: var(--sel); }
-  #log { color: var(--dim); height: 136px; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
+  .left { display: grid; gap: 12px; min-width: 0; }
+  #log { color: var(--dim); height: 150px; overflow-y: auto; }
   #log div::before { content: "・"; }
   #log div:last-child { color: var(--text); }
 
@@ -91,7 +89,6 @@
   footer button:hover { color: var(--frame-hi); }
   footer button.on { color: var(--accent); }
   footer button.on kbd { background: var(--accent); }
-  footer .spacer { flex: 1; }
   footer { flex-wrap: wrap; }
   footer .gens, footer .orders { display: flex; align-items: center; gap: 4px; color: var(--frame-hi); margin-left: 12px; }
   footer .gens button { padding: 2px 8px; border: 1px solid var(--faint); }
@@ -109,25 +106,23 @@
   footer .adviser button { padding: 2px 8px; border: 1px solid var(--faint); margin-left: 12px; }
   footer .adviser button.on { border-color: var(--accent); background: var(--sel); }
   footer .themes button { padding: 2px 8px; border: 1px solid var(--faint); margin-left: 12px; }
-  footer label { display: flex; align-items: center; gap: 8px; color: var(--frame-hi); }
-  footer label b { font-weight: 400; color: var(--accent); min-width: 84px; }
-  input[type=range] { -webkit-appearance: none; appearance: none; width: 180px; height: 14px; background: repeating-linear-gradient(90deg, var(--faint) 0 4px, transparent 4px 8px); outline: none; }
-  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 20px; background: var(--accent); cursor: pointer; }
-  input[type=range]::-moz-range-thumb { width: 12px; height: 20px; background: var(--accent); border: 0; cursor: pointer; }
 </style>
 </head>
 <body>
 <header>
-  <h1>LAYA <span>ROGUE</span></h1><span class="ver">Ver 1.00</span>
+  <h1>LAYA <span>ROGUE</span></h1>
   <div class="spacer"></div>
   <div id="device">接続中…</div>
 </header>
 <main>
-  <fieldset class="stage">
-    <legend>DUNGEON<em id="depth">B1F</em></legend>
-    <canvas id="cv"></canvas>
-    <div id="died"><div><span id="diedTitle">LAYA DIED</span><small id="diedSub"></small></div></div>
-  </fieldset>
+  <div class="left">
+    <fieldset class="stage">
+      <legend>DUNGEON<em id="depth">B1F</em></legend>
+      <canvas id="cv"></canvas>
+      <div id="died"><div><span id="diedTitle">LAYA DIED</span><small id="diedSub"></small></div></div>
+    </fieldset>
+    <fieldset><legend>ログ</legend><div id="log"></div></fieldset>
+  </div>
   <aside>
     <fieldset>
       <legend>勇者</legend>
@@ -162,32 +157,21 @@
       <legend>LAYA の判断<em id="ms">– ms</em></legend>
       <div id="order">–</div>
       <div id="adviser" class="off"><div id="plan">–</div><div id="reason"></div></div>
-      <div id="state"></div>
       <div id="acts"></div>
       <div class="grid">
-        <div class="cell"><div class="v" id="rate">0</div><div class="k">手/秒</div></div>
-        <div class="cell"><div class="v" id="genNow">–</div><div class="k">学習世代</div></div>
-        <div class="cell"><div class="v">なし</div><div class="k">手の指示</div></div>
-        <div class="cell"><div class="v">0</div><div class="k">生成token</div></div>
+        <div class="cell wide"><div class="v" id="tokLaya">0</div><div class="k">Laya token</div></div>
+        <div class="cell wide"><div class="v" id="tokAdviser">0</div><div class="k">方針役 token</div></div>
       </div>
     </fieldset>
-    <fieldset>
-      <legend>難易度別の成績</legend>
-      <table><thead><tr><th>難易度</th><th>挑戦</th><th>平均到達</th><th>最深</th><th>平均撃破</th></tr></thead><tbody id="genStats"></tbody></table>
-    </fieldset>
-    <fieldset><legend>ログ</legend><div id="log"></div></fieldset>
   </aside>
 </main>
 <footer>
   <button id="pause"><kbd>SPACE</kbd><span>一時停止</span></button>
-  <button id="step"><kbd>.</kbd>1手進める</button>
   <button id="restart"><kbd>R</kbd>最初から</button>
   <div class="orders">命令 <span id="orders"></span></div>
   <div class="gens">難易度 <span id="gens"></span></div>
   <div class="adviser"><button id="adviserBtn"><kbd>L</kbd><span>方針役</span></button></div>
   <div class="themes"><button id="themeBtn"><kbd>T</kbd><span>テーマ</span></button></div>
-  <div class="spacer"></div>
-  <label>SPEED <input type="range" id="speed" min="0" max="100" value="62"> <b id="speedv"></b></label>
 </footer>
 
 <script>
@@ -290,10 +274,9 @@ const FONT = '"DotGothic16", "MS Gothic", monospace';
 
 let GW = 48, GH = 26, T = 20;
 let tiles = [], lit = new Set(), hero = null, heroDraw = null, monsters = new Map(), items = [], traps = [], floats = [], danger = 0, shake = 0, flash = 0;
-const stats = { stamps: [], ms: [] };
-const genStats = new Map();   // 難易度 -> { runs, depth, best, kills }
+const stats = { ms: [] };
+let m_tokens = null;   // this game's token totals from the server: {laya, adviser}
 let generation = null, difficulty = "normal";
-const genLabel = g => g ?? "未学習";
 
 // ---------------------------------------------------------------- websocket
 const ws = new WebSocket(`ws://${location.host}/ws`);
@@ -304,20 +287,18 @@ ws.onclose = () => {                       // server restarted (new code) or sto
 };
 ws.onmessage = ev => {
   const m = JSON.parse(ev.data);
-  if (m.type === "hello") { GW = m.w; GH = m.h; $("device").textContent = m.replay ? `再生: ${m.replay}` : ""; resize(); pushConfig(); generation = m.generation; $("genNow").textContent = genLabel(generation); setupDifficulties(m.difficulties, m.difficulty); setupOrders(m.orders, m.order); setAdviser(m.adviser); }
+  if (m.type === "hello") { GW = m.w; GH = m.h; $("device").textContent = m.replay ? `再生: ${m.replay}` : ""; resize(); pushConfig(); generation = m.generation; setupDifficulties(m.difficulties, m.difficulty); setupOrders(m.orders, m.order); setAdviser(m.adviser); }
   else if (m.type === "adviser") setAdviser(m.adviser);
-  else if (m.type === "replay") { $("device").textContent = `再生: ${m.file}`; generation = m.generation; $("genNow").textContent = genLabel(generation); setDifficulty(m.difficulty); }
-  else if (m.type === "thinking") { $("adviser").classList.add("thinking"); $("reason").textContent = `方針役が考え中… (${TRIGGER_JP[m.kind] ?? m.kind})`; }
+  else if (m.type === "replay") { $("device").textContent = `再生: ${m.file}`; generation = m.generation; setDifficulty(m.difficulty); }
+  else if (m.type === "thinking") { thinking = { since: performance.now(), kind: m.kind }; $("adviser").classList.add("thinking"); $("reason").textContent = `方針役が考え中… (${TRIGGER_JP[m.kind] ?? m.kind})`; }
   else if (m.type === "advice") onAdvice(m);
   else if (m.type === "order") setOrder(m.order, true);
   else if (m.type === "difficulty") setDifficulty(m.difficulty);
   else if (m.type === "floor") { tiles = Array.from({ length: GH }, () => new Array(GW).fill(-1)); monsters.clear(); hero = null; heroDraw = null; $("died").classList.remove("show"); }
   else if (m.type === "frame") onFrame(m);
   else if (m.type === "end") {
+    thinking = null;
     shake = m.won ? 0 : 1;
-    const gs = genStats.get(m.difficulty) ?? { runs: 0, depth: 0, best: 0, kills: 0 };
-    gs.runs++; gs.depth += m.depth; gs.kills += m.kills; gs.best = Math.max(gs.best, m.depth);
-    genStats.set(m.difficulty, gs); renderGenStats();
     $("diedTitle").textContent = m.won ? (m.depth === 0 ? "魔除けを持って帰還！" : `B${m.depth}F 到達！`) : "LAYA DIED";
     $("diedSub").textContent = (m.won ? "" : `死因: ${m.cause} / `) + `B${m.depth}F / Lv${m.level} / 撃破 ${m.kills} / 金貨 ${m.gold} / ${m.turn} ターン`;
     $("died").classList.toggle("won", m.won);
@@ -331,7 +312,7 @@ const TRIGGER_JP = { floor: "階に到着", hp: "体力低下", hunger: "空腹"
 const FETCH_JP = { armor: "防具", weapon: "武器", food: "食料", potion: "薬", scroll: "巻物", wand: "杖", gold: "金貨", ring: "指輪", magic: "魔法の品" };
 const PLAN_JP = { explore_fully: "この階を探索し切る", descend_asap: "階段を見つけ次第降りる", free: "おまかせ" };
 const TACTIC_JP = { fight: "戦え", flee: "逃げろ", escape: "階段で離脱" };
-let adviser = null;
+let adviser = null, thinking = null;   // thinking: {since, kind} while the strategist is being consulted (the game waits)
 function planText(a) {
   return [PLAN_JP[a.plan] ?? a.plan, a.rest ? "傷は休んで治す" : null, TACTIC_JP[a.tactic] ? `敵には「${TACTIC_JP[a.tactic]}」` : null,
           FETCH_JP[a.fetch] ? `${FETCH_JP[a.fetch]}を拾いに行く` : null].filter(Boolean).join(" / ");
@@ -345,18 +326,15 @@ function setAdviser(a) {
   if (a.stopped) $("reason").textContent = `自動停止: ${a.stopped}（L で再開）`;
 }
 function onAdvice(m) {
+  thinking = null;
   $("adviser").classList.remove("thinking");
   setAdviser(m.adviser);
-  const el = document.createElement("div");
-  if (m.error) { $("reason").textContent = `方針役の応答なし: ${m.error}`; el.textContent = "方針役の応答なし"; }
+  if (m.error) { $("reason").textContent = `方針役の応答なし: ${m.error}`; addLog(["方針役の応答なし"], "var(--accent)"); }
   else {
     $("reason").textContent = `${TRIGGER_JP[m.kind] ?? m.kind}: ${m.reason} (${m.sec}秒)`;
-    el.textContent = `方針役「${m.reason}」`;
+    addLog([`方針役「${m.reason}」`], "var(--accent)");
     if (hero) floats.push({ x: hero.x, y: hero.y - 1, text: `「${PLAN_JP[m.plan] ?? m.plan}」`, c: TH.shout, life: 1.4, vy: -0.7 });
   }
-  el.style.color = "var(--accent)";
-  $("log").appendChild(el);
-  while ($("log").children.length > 6) $("log").firstChild.remove();
 }
 function setupOrders(list, current) {
   $("order").style.display = document.querySelector("footer .orders").style.display = list.length ? "" : "none";
@@ -388,30 +366,14 @@ function setupDifficulties(list, current) {
 function setDifficulty(name) {
   difficulty = name;
   for (const b of $("gens").children) b.classList.toggle("on", b.dataset.gen === name);
-  renderGenStats();
 }
-function renderGenStats() {
-  const names = [...$("gens").children].map(b => b.dataset.gen);
-  $("genStats").innerHTML = names.map(n => {
-    const s = genStats.get(n);
-    return `<tr class="${n === difficulty ? "now" : ""}"><td>${n.toUpperCase()}</td><td>${s ? s.runs : "–"}</td><td>${s ? "B" + (s.depth / s.runs).toFixed(1) + "F" : "–"}</td><td>${s ? "B" + s.best + "F" : "–"}</td><td>${s ? (s.kills / s.runs).toFixed(1) : "–"}</td></tr>`;
-  }).join("");
-}
-function delayFromSlider() { const v = +$("speed").value; return v >= 100 ? 0 : Math.pow(1 - v / 100, 2.2) * 1.0; }
-function pushConfig() {
-  const d = delayFromSlider();
-  $("speedv").textContent = d === 0 ? "MAX" : `${(1 / (d + 0.02)).toFixed(d > 0.2 ? 1 : 0)} 手/秒`;
-  send({ type: "config", delay: d, paused });
-}
-$("speed").oninput = pushConfig;
+function pushConfig() { send({ type: "config", paused }); }  // speed is the server's fixed delay (about 7 moves/s)
 $("pause").onclick = () => { paused = !paused; $("pause").classList.toggle("on", paused); $("pause").querySelector("span").textContent = paused ? "再開" : "一時停止"; pushConfig(); };
-$("step").onclick = () => { if (!paused) $("pause").onclick(); send({ type: "step" }); };
 $("restart").onclick = () => send({ type: "restart" });
 $("adviserBtn").onclick = () => send({ type: "adviser", enabled: !(adviser?.enabled && !adviser?.stopped) });
 $("themeBtn").onclick = () => applyTheme(THEME_ORDER[(THEME_ORDER.indexOf(themeName) + 1) % THEME_ORDER.length]);
 addEventListener("keydown", e => {
   if (e.code === "Space") { e.preventDefault(); $("pause").onclick(); }
-  else if (e.key === ".") $("step").onclick();
   else if (e.key === "r" || e.key === "R") $("restart").onclick();
   else if (e.key === "l" || e.key === "L") $("adviserBtn").onclick();
   else if (e.key === "t" || e.key === "T") $("themeBtn").onclick();
@@ -419,6 +381,12 @@ addEventListener("keydown", e => {
 });
 
 // ---------------------------------------------------------------- frame
+function addLog(lines, color) {           // keeps the last 500 lines; follows the newest unless scrolled up
+  const box = $("log"), follow = box.scrollTop + box.clientHeight >= box.scrollHeight - 4;
+  for (const line of lines) { const el = document.createElement("div"); el.textContent = line; if (color) el.style.color = color; box.appendChild(el); }
+  while (box.children.length > 500) box.firstChild.remove();
+  if (follow) box.scrollTop = box.scrollHeight;
+}
 let pendingPanel = null;
 function onFrame(m) {
   if (m.adviser) setAdviser(m.adviser);
@@ -445,16 +413,15 @@ function onFrame(m) {
   danger += (Math.max(0, 1 - 2 * hero.hp / hero.max_hp) - danger) * 0.35;   // HP が半分を切ると画面の縁が赤くなる
 
   const d = m.decision, now = performance.now();
-  stats.stamps.push(now); if (d.ms) { stats.ms.push(d.ms); if (stats.ms.length > 120) stats.ms.shift(); }
-  for (const line of m.log) { const el = document.createElement("div"); el.textContent = line; $("log").appendChild(el); }
-  while ($("log").children.length > 6) $("log").firstChild.remove();
+  if (m.tokens) m_tokens = m.tokens;
+  if (d.ms) { stats.ms.push(d.ms); if (stats.ms.length > 120) stats.ms.shift(); }
+  addLog(m.log);
   pendingPanel = m;
 }
 
 setInterval(() => {                       // パネルは 10Hz。毎フレーム書き換えると読めない
   const now = performance.now();
-  stats.stamps = stats.stamps.filter(s => now - s < 1000);
-  $("rate").textContent = stats.stamps.length;
+  if (m_tokens) { $("tokLaya").textContent = m_tokens.laya.toLocaleString(); $("tokAdviser").textContent = m_tokens.adviser.toLocaleString(); }
   if (stats.ms.length) { const s = [...stats.ms].sort((a, b) => a - b); $("ms").textContent = `${s[s.length >> 1].toFixed(1)} ms`; }
   const m = pendingPanel; if (!m) return; pendingPanel = null;
   const h = m.hero, f = h.hp / h.max_hp;
@@ -475,7 +442,6 @@ setInterval(() => {                       // パネルは 10Hz。毎フレーム
   if (sc > hiscore) { hiscore = sc; try { localStorage.setItem("laya-rogue-hiscore", hiscore); } catch {} }
   $("score").textContent = sc; $("hiscore").textContent = hiscore;
   const d = m.decision;
-  $("state").textContent = d.state;
   const acts = ORDER.filter(a => a in d.probs);
   $("acts").innerHTML = acts.map(a =>
     `<div class="act ${a === d.action ? "done" : ""}"><span class="mark">${a === d.action ? "▶" : ""}</span><span class="name">${JP[a]}</span>`
@@ -562,7 +528,19 @@ function draw(now) {
     v.addColorStop(0, "rgba(160,0,0,0)"); v.addColorStop(1, `rgba(190,10,10,${Math.min(.75, danger * .8) * pulse})`);
     g.fillStyle = v; g.fillRect(-T, 0, W_ + T * 2, H_);
   }
+  if (thinking) drawThinking(now);
   requestAnimationFrame(draw);
+}
+function drawThinking(now) {             // the game waits for the strategist: dim the map and show a banner on top
+  const W_ = T * VIEW_W, H_ = T * GH, sec = (now - thinking.since) / 1000, pulse = 0.6 + 0.4 * Math.sin(now / 220);
+  g.fillStyle = "rgba(0,0,0,.35)"; g.fillRect(-T, 0, cv.clientWidth + T * 2, H_);
+  g.font = `${Math.round(T * 0.9)}px ${FONT}`; g.textAlign = "center"; g.textBaseline = "middle";
+  const text = `方針役が考え中  ${TRIGGER_JP[thinking.kind] ?? thinking.kind}  ${sec.toFixed(1)} 秒`;
+  const bw = g.measureText(text).width + T * 2, bh = T * 1.6, bx = (W_ - bw) / 2, by = T * 0.6;
+  g.fillStyle = "rgba(0,0,0,.82)"; g.strokeStyle = TH.shout; g.lineWidth = 2; g.globalAlpha = 0.75 + 0.25 * pulse;
+  g.beginPath(); g.roundRect(bx, by, bw, bh, T * 0.4); g.fill(); g.stroke();
+  g.globalAlpha = 1; g.fillStyle = TH.shout; g.fillText(text, W_ / 2, by + bh / 2);
+  g.textBaseline = "alphabetic";
 }
 function glyph(ch, x, y, color, bright, bold) {
   g.font = `${Math.round(T * (bold ? 1.1 : 1))}px ${FONT}`; g.textAlign = "center"; g.textBaseline = "middle";
