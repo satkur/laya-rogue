@@ -216,6 +216,8 @@ class Game:
         c.melee = dict(self.melee) if self.melee else None
         c.gear = [dict(x) for x in self.gear]
         c.visible = set(self.visible)
+        c.mapped = set(self.mapped)  # magic mapping and light in a rollout must not leak into the real game
+        c.rooms = [dict(r) for r in self.rooms]
         c.newly_seen = []
         c.log = []
         c._dist = None
@@ -1413,8 +1415,9 @@ class Game:
                 v.append("ascend")
         if self.pack_full() and self._junk():
             v.append("drop")
-        # 安全弁 (NOTES 13 章): HP 90% 以上で敵が起きておらず空腹でもなければ待つ理由がない。他に取れる行動があるときだけ外す
-        if not (self.hp >= 0.9 * self.max_hp and not awake and self.hunger_word() == "fine" and any(a in v for a in ("explore", "pick_up", "descend", "search"))):
+        # 安全弁 (NOTES 13 章): HP 90% 以上で敵が起きていなければ待つ理由がない。他に取れる行動があるときだけ外す
+        # hunger no longer exempts it (2026-10-03): hungry rests were noise amplified into the teacher; table brain starved 22 -> 10 of 512 (NOTES 15)
+        if not (self.hp >= 0.9 * self.max_hp and not awake and any(a in v for a in ("explore", "pick_up", "descend", "search"))):
             v.append("rest")
         return v
 

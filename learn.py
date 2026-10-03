@@ -52,7 +52,8 @@ COMMIT_ACTIONS = {"rest", "explore", "search", "descend", "ascend", "approach", 
 # attack も COMMIT (2026-09-28): 1 回殴って残りを表任せにすると、殴り合いの価値が表のノイズに埋もれていた (NOTES 15 章)
 MAX_TURNS = 3000
 EPSILON = 0.15      # 表を無視して気まぐれに動く確率 (知らない局面に出会うため)
-DECAY = 0.5         # ラウンドをまたぐとき、古い経験の重みをこれだけ残す
+DECAY = 0.9         # ラウンドをまたぐとき、古い経験の重みをこれだけ残す
+# 0.9 (2026-10-03): at 0.5 key weights cap at 2x one round, so taught keys (w>=4) stayed at ~2,300 from round 3 on (NOTES 15)
 GAMMA = 0.85        # 先読みの終点から先の見込みを、どれだけ割り引いて足すか (0 で足さない)
 ROLL_TEMP = 0.2     # 先読みの中での行動の選び方 (softmax の温度)
 COMMIT = 10         # 調べる行動は、状況 (粗いキー) が変わるまで最大このターン数だけ続ける。「休む」のように 1 回では差が出ない行動の価値を測るため
@@ -230,7 +231,7 @@ def episode(args):
         if len(valid) > 1 and rng.random() < p_eval:
             # 行動どうしの比較では同じ乱数列を使う。「運の差」が消えて「行動の差」だけが残る
             seeds = [rng.random() for _ in range(ROLLOUTS_COMBAT if combat else ROLLOUTS)]
-            out.append((key, describe(g, valid), {a: sum(rollout(g, a, _table, _v_default, s) for s in seeds) / ROLLOUTS for a in valid}))
+            out.append((key, describe(g, valid), {a: sum(rollout(g, a, _table, _v_default, s) for s in seeds) / len(seeds) for a in valid}))
         a = pick(_table, key, valid, rng, TAU, EPSILON)
         g.step(a)
         if actions is not None:
