@@ -1,4 +1,4 @@
-"""server.py --llm --no-open を起動した状態で実行。gen を選んで 1 ゲームを録画する (webm)。
+"""server.py --no-open を起動した状態で実行。gen を選んで 1 ゲームを録画する (webm)。
     uv run --no-project --with playwright python tools/record.py <出力dir> <gen> <上限秒> <mode>   (Playwright は venv に無いので --with で取る)   mode: shell (旧ヘッドレス) / headed (ウィンドウ) / newheadless (GPU 付き新ヘッドレス)
 """
 import sys, time, json

@@ -33,7 +33,7 @@ import rogue_data as D
 from brain import SPECIAL, dist_word, hp_word, pace_word, redraw, threat_word
 from game import active
 
-DEFAULT_MODEL = "claude-sonnet-5"   # 方針役の既定 (2026-09-24 に Sonnet 5 へ。Opus は過剰。claude -p の --model に渡す)
+DEFAULT_MODEL = "claude-sonnet-5-5"   # 方針役の既定 (2026-09-24 に Sonnet 5、2026-10-03 に Sonnet 5.5 へ。Opus は過剰。claude -p の --model に渡す)
 PERIOD = 300          # 定期の見回り (ターン)。制約が効いているか、体力や空腹に懸念があるときだけ呼ぶ
 MIN_GAP = 6           # 連続で呼ばない最短間隔 (ターン)
 STUCK_SPAN = 40       # このターン数のあいだ、踏んだマスが STUCK_TILES 種類以下なら足踏みとみなす

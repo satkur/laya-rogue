@@ -22,8 +22,8 @@
 uv sync
 uv run learn.py 16 1200
 uv run train.py 16 gen21 30
-uv run server.py          # http://127.0.0.1:8766/
-uv run server.py --llm    # 方針役つき (Claude Code の claude -p を呼ぶので、ログイン済みの Claude Code が要る)
+uv run server.py          # http://127.0.0.1:8766/ 方針役つき (Claude Code の claude -p を呼ぶので、ログイン済みの Claude Code が要る)
+uv run server.py --no-llm # 方針役なし
 uv run server.py --difficulty original   # 難易度 normal / hard / original (画面からも切り替えられる)
 uv run server.py --replay data/replays    # sim.py / learn.py の記録を再生 (ディレクトリなら最新の記録を追いかけ、回している対戦をそのまま見られる)
                                           # 画面: SPACE 一時停止、. 1 手、R 最初から、L 方針役、T テーマ (LAYA ROGUE / DOS 16 色 / CGA 4 色 / xterm 風)
