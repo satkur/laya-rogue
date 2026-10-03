@@ -304,10 +304,12 @@ class LayaBrain:
             return {"action": valid[0], "probs": {valid[0]: 1.0}, "state": state, "ms": 0.0}
         q = {"action": {"type": "choice", "instructions": INSTRUCTIONS, "criteria": {a: ACTION_DESC[a] for a in valid}}}
         t0 = time.perf_counter()
-        probs = self.agent.predict(state, q)["answers"]["action"]["probabilities"]
+        out = self.agent.predict(state, q)
+        probs = out["answers"]["action"]["probabilities"]
         ms = (time.perf_counter() - t0) * 1000
         rng = getattr(g, "action_rng", self.rng)
-        d = {"action": choose(probs, self.sharpness, rng), "probs": probs, "state": state, "ms": ms}
+        d = {"action": choose(probs, self.sharpness, rng), "probs": probs, "state": state, "ms": ms,
+             "tokens": out.get("usage", {}).get("input_tokens", 0)}  # tokens read (Laya only classifies; it generates none)
         return redraw(d, safety_valves(g, valid), self.sharpness, rng)
 
 
