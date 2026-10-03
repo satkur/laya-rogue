@@ -2,7 +2,7 @@
 
     uv run server.py            # モデルを読み込み、ブラウザを開く
     uv run server.py --no-open
-    uv run server.py --llm      # 方針役の LLM (strategist.py、claude -p を呼ぶ) を入れた状態で始める。画面の L キーでも切り替えられる
+    uv run server.py --no-llm   # 方針役の LLM (strategist.py、claude -p を呼ぶ) を切った状態で始める (既定は入り)。画面の L キーでも切り替えられる
     uv run server.py --llm-model sonnet
     uv run server.py --gen gen22    # 世代を指定 (既定は DEFAULT_GENERATION = 測定済みの最良)。画面からは替えない
     uv run server.py --difficulty original   # 難易度 (既定 normal)。画面からも切り替えられる (NOTES.md 15 章)
@@ -43,7 +43,7 @@ REPLAY_DIR = REPLAY if REPLAY and REPLAY.is_dir() else None  # ディレクト�
 CATCH_UP = 100  # 記録中の記録に移るとき、末尾のこの手数だけ残して飛ばす
 replay_state = {"enabled": False, "model": "", "stopped": None, "calls": 0, "plan": "free", "rest": False, "tactic": "free", "fetch": "none"}  # 再生中の方針役の表示
 replay = {"cfg": {"delay": 0.119, "paused": False, "step": False, "restart": False}, "clients": set(), "game": None, "file": None, "rec": None}  # one replay, streamed to every tab
-adviser = Strategist(model=LLM_MODEL, enabled="--llm" in sys.argv)  # いまは付けると成績が下がるので既定は切 (NOTES.md 6 章)
+adviser = Strategist(model=LLM_MODEL, enabled="--no-llm" not in sys.argv)  # 既定は入り (2026-10-03 ユーザー指示。測定では付けると成績が下がる、NOTES.md 15 章)
 strategist_mod.MAX_CALLS_TOTAL = 300  # 画面を開きっぱなしにしても、ここで方針役は自動で止まる (画面で入れ直すと再開)
 
 
