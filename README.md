@@ -1,8 +1,8 @@
 # laya-rogue
 
-[Laya](https://github.com/NandhaKishorM/laya) にローグライクをプレイさせる個人の実験。メモは [NOTES.md](NOTES.md)。
+[Laya](https://github.com/NandhaKishorM/laya) にローグライクをプレイさせる個人の実験。
 
-![一手一手は Laya、方針は claude -p (Sonnet 5.5)。1 階で階段を降り、2 階に着くと方針役が「この階を探索し切る」を出し、近くの杖を拾うまで (方針役の相談中は縮めてある)](docs/demo.gif)
+![一手一手は Laya、方針は claude -p (Sonnet 5.5)、テーマは xterm 風。1 階でホブゴブリンに出会って方針役に相談し、2 階でホブゴブリンに倒されるまで (方針役の相談中は縮めてある)](docs/demo.gif)
 
 きっかけは laya-mlx の [Snake デモ](https://mizchi-laya-web-demo.static.hf.space/snake.html)。ローカルで秒間 60 回判断できる小さな AI なら、何かゲームに使えるかもしれないと思った。
 
@@ -14,14 +14,29 @@
 
 とはいえ Snake デモにも planner はあるし、[Minecraft のエンダードラゴン討伐](https://github.com/rmalde/minecraft-agent)も LLM が計画して Jev が即断する分業だった。そこで planner の位置に `claude -p` を置き、一手一手は Laya、全体方針は LLM という形にした。
 
-方針役を付けても成績はまだ変わらない。ただ介入の理由が画面に出るので、見た目はいい感じになった。次に何をするかは未定。
+## 0.1.0 の時点 (2026-10-04)
+
+本家 Rogue 5.4.4 準拠のゲームの学習用の難易度 NORMAL (本家の全要素入りは ORIGINAL) で、128 回の平均到達階:
+
+| 頭脳 | 1 階から | 20 階 |
+|---|---|---|
+| ランダム | 約 2 | 0 |
+| 人間が書いた簡単な if 文 | 7.75 | 0 |
+| **Laya (自己対戦で学習した判断ヘッド 14.8M)** | **7.96** (最高 17) | 0 |
+| 人間が書いた強い if 文 | 9.19 | 0 |
+
+1 手 12 ms。強い if 文でも 20 階には届かないので、「まず 20 階」はこの環境では的にならなかった。
+
+方針役 (Sonnet) は成績を上げない。付けると下がることが多く、いまは判断の理由を画面に出す実況の役。
+
+観戦画面には、近くの敵ととどめを刺した敵の絵が出る。
 
 ## 遊び方
 
 ```
 uv sync
 uv run learn.py 16 1200
-uv run train.py 16 gen21 30
+uv run train.py 16 gen26 60
 uv run server.py          # http://127.0.0.1:8766/ 方針役つき (Claude Code の claude -p を呼ぶので、ログイン済みの Claude Code が要る)
 uv run server.py --no-llm # 方針役なし
 uv run server.py --difficulty original   # 難易度 normal / hard / original (画面からも切り替えられる)
