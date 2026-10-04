@@ -41,8 +41,10 @@ All code here is an independent Python implementation; no original source code i
 This project is not affiliated with or endorsed by the original authors or any rights holder of the "Rogue" name.
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
+観戦画面のモンスターの絵 (`static/monsters/`) は とり夫 さんのフリー素材 ([pixiv](https://www.pixiv.net/users/5887541))。MIT の対象外。
+
 Laya 本体は Convai Innovations による Apache 2.0 のモデルで、このリポジトリには含まれない。
 
 ## ライセンス
 
-MIT（`rogue_data.py` の数値表の出典については THIRD_PARTY_NOTICES.md）。
+MIT（`rogue_data.py` の数値表の出典と、モンスターの絵については THIRD_PARTY_NOTICES.md）。

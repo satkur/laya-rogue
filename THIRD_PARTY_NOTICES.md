@@ -34,3 +34,10 @@ LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 SUCH DAMAGE.
 ```
+
+## Monster pictures
+
+The pictures in `static/monsters/` are by とり夫 (https://www.pixiv.net/users/5887541), taken from the artist's
+free monster image collection and cropped and resized by `tools/make_monster_art.py`. The artist allows any use,
+including commercial use, modification and redistribution, without notice. They are not covered by this
+repository's MIT license.

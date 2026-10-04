@@ -13,6 +13,7 @@
 """
 import asyncio
 import json
+import mimetypes
 import sys
 import time
 import webbrowser
@@ -22,6 +23,7 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 import rogue_data as D
 from brain import WEIGHTS, LayaBrain
@@ -83,6 +85,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+mimetypes.add_type("image/webp", ".webp")  # missing from the Windows registry on some machines
+app.mount("/monsters", StaticFiles(directory=STATIC / "monsters"), name="monsters")
 
 
 @app.get("/")

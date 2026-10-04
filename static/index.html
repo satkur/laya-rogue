@@ -83,7 +83,18 @@
   tr.now td:first-child::before { content: "▶"; color: var(--accent); }
   tr.now { background: var(--sel); }
   .left { display: grid; grid-template-rows: minmax(0, 1fr) 170px; gap: 12px; min-width: 0; min-height: 0; }
-  .left > fieldset:last-child { min-height: 0; display: flex; flex-direction: column; }
+  .bottom { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 12px; min-height: 0; }
+  .bottom > fieldset { min-height: 0; display: flex; flex-direction: column; }
+  /* 遭遇: いちばん近い敵の絵。眠っている敵と、見えなくなった敵は暗く */
+  #foe { position: relative; padding: 4px; }
+  #foe img { flex: 1; min-height: 0; width: 100%; object-fit: contain; filter: saturate(.75) sepia(.12); transition: filter .4s; }
+  #foe img.asleep { filter: grayscale(.7) brightness(.5); }
+  #foe img.gone { filter: grayscale(1) brightness(.25); }
+  #foe img[src=""] { visibility: hidden; }
+  #foeName { position: absolute; left: 4px; right: 4px; bottom: 2px; text-align: center; font-size: 14px; color: var(--frame-hi); text-shadow: 1px 1px 0 #000, 0 0 4px #000; }
+  #diedArt { position: absolute; inset: 0; margin: auto; height: 92%; max-width: 92%; object-fit: contain; opacity: .6; mix-blend-mode: screen; filter: saturate(.7) sepia(.15); }
+  #diedArt[src=""] { display: none; }
+  #died > div { position: relative; }
   #log { color: var(--dim); flex: 1; min-height: 0; overflow-y: auto; }
   #log div::before { content: "・"; }
   #log div:last-child { color: var(--text); }
@@ -125,9 +136,12 @@
     <fieldset class="stage">
       <legend>DUNGEON<em id="depth">B1F</em></legend>
       <canvas id="cv"></canvas>
-      <div id="died"><div><span id="diedTitle">LAYA DIED</span><small id="diedSub"></small></div></div>
+      <div id="died"><img id="diedArt" src="" alt=""><div><span id="diedTitle">LAYA DIED</span><small id="diedSub"></small></div></div>
     </fieldset>
-    <fieldset><legend>ログ</legend><div id="log"></div></fieldset>
+    <div class="bottom">
+      <fieldset id="foe"><legend>敵</legend><img id="foeArt" src="" alt=""><div id="foeName"></div></fieldset>
+      <fieldset><legend>ログ</legend><div id="log"></div></fieldset>
+    </div>
   </div>
   <aside>
     <fieldset>
@@ -199,6 +213,26 @@ const ORDER_JP = { cautious: "慎重に", aggressive: "攻めろ", loot: "漁れ
 let order = null;
 const ITEM = { gold: "*", food: ":", potion: "!", weapon: ")", armor: "]", scroll: "?", missile: ")", bow: ")", ring: "=", stick: "/", amulet: "," };
 const monsterColor = mo => mo.awake ? TH.awake : TH.asleep;
+const MONSTER_JP = { A: "アクエーター", B: "コウモリ", C: "ケンタウロス", D: "ドラゴン", E: "エミュー", F: "ハエトリグサ", G: "グリフィン",
+                     H: "ホブゴブリン", I: "アイスモンスター", J: "ジャバウォック", K: "チョウゲンボウ", L: "レプラコーン", M: "メデューサ",
+                     N: "ニンフ", O: "オーク", P: "ファントム", Q: "クアッガ", R: "ガラガラヘビ", S: "ヘビ", T: "トロル", U: "ブラックユニコーン",
+                     V: "バンパイア", W: "レイス", X: "ゼロック", Y: "イエティ", Z: "ゾンビ" };
+const art = ch => `/monsters/${ch}.webp`;   // pictures by とり夫 (THIRD_PARTY_NOTICES.md)
+for (const ch of Object.keys(MONSTER_JP)) new Image().src = art(ch);
+let foe = "";
+function showFoe(ch, state) {             // state: awake / asleep / gone
+  const img = $("foeArt"), key = ch + state;
+  if (foe === key) return; foe = key;
+  img.src = ch ? art(ch) : ""; img.className = state;
+  $("foeName").textContent = ch ? MONSTER_JP[ch] : "";
+}
+function pickFoe(list, h) {               // the nearest awake monster, else the nearest one; keep the last one dimmed when none is in sight
+  const d = mo => Math.max(Math.abs(mo.x - h.x), Math.abs(mo.y - h.y));
+  const best = [...list].sort((a, b) => (b.awake - a.awake) || d(a) - d(b))[0];
+  if (best) showFoe(best.ch, best.awake ? "awake" : "asleep");
+  else if (foe) showFoe(foe[0], "gone");
+}
+const causeLetter = cause => Object.keys(MONSTER_JP).find(ch => cause?.startsWith(MONSTER_JP[ch])) ?? "";
 
 // ---------------------------------------------------------------- themes: css overrides :root vars, game colors the canvas. Glow and torch flicker are the same in every theme
 const BOX = { h: "═", v: "║", tl: "╔", tr: "╗", bl: "╚", br: "╝", x: "╬" };
@@ -295,7 +329,7 @@ ws.onmessage = ev => {
   else if (m.type === "advice") onAdvice(m);
   else if (m.type === "order") setOrder(m.order, true);
   else if (m.type === "difficulty") setDifficulty(m.difficulty);
-  else if (m.type === "floor") { tiles = Array.from({ length: GH }, () => new Array(GW).fill(-1)); monsters.clear(); hero = null; heroDraw = null; $("died").classList.remove("show"); }
+  else if (m.type === "floor") { tiles = Array.from({ length: GH }, () => new Array(GW).fill(-1)); monsters.clear(); hero = null; heroDraw = null; $("died").classList.remove("show"); showFoe("", ""); }
   else if (m.type === "frame") onFrame(m);
   else if (m.type === "end") {
     thinking = null;
@@ -303,6 +337,7 @@ ws.onmessage = ev => {
     $("diedTitle").textContent = m.won ? (m.depth === 0 ? "魔除けを持って帰還！" : `B${m.depth}F 到達！`) : "LAYA DIED";
     $("diedSub").textContent = (m.won ? "" : `死因: ${m.cause} / `) + `B${m.depth}F / Lv${m.level} / 撃破 ${m.kills} / 金貨 ${m.gold} / ${m.turn} ターン`;
     $("died").classList.toggle("won", m.won);
+    const ch = m.won ? "" : causeLetter(m.cause); $("diedArt").src = ch ? art(ch) : "";
     $("died").classList.add("show");
   }
 };
@@ -410,6 +445,7 @@ function onFrame(m) {
     monsters.delete(id);
   }
   hero = m.hero;
+  pickFoe(m.monsters, hero);
   if (!heroDraw) heroDraw = { x: hero.x, y: hero.y };
   danger += (Math.max(0, 1 - 2 * hero.hp / hero.max_hp) - danger) * 0.35;   // HP が半分を切ると画面の縁が赤くなる
 
